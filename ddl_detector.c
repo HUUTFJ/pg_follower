@@ -36,24 +36,38 @@ verify_statement(CreateStmt *stmt)
 {
 	ListCell *lc;
 
-	/* Only normal relation is supported */
+	/* Both UNLOGGED and TEMPORARY clauses are not supported */
 	if (stmt->relation->relpersistence != RELPERSISTENCE_PERMANENT)
 	{
 		elog(WARNING, "unlogged/temporary tables are not supported");
 		return false;
 	}
 
-	/* Partitioned relation is not supported */
+	/* PARTITION OF clause is not supported */
+	if (stmt->partspec != NULL)
+	{
+		elog(WARNING, "partition tables are not supported");
+		return false;
+	}
+
+	/* PARTITION BY clause is not supported */
 	if (stmt->partspec != NULL)
 	{
 		elog(WARNING, "partitioned tables are not supported");
 		return false;
 	}
 
-	/* Inherited relation is not supported */
+	/* INHERITS clause is not supported */
 	if (stmt->inhRelations != NIL)
 	{
 		elog(WARNING, "inherited tables are not supported");
+		return false;
+	}
+
+	/* OF type_name clause is not supported */
+	if (stmt->ofTypename != NULL)
+	{
+		elog(WARNING, "typed tables are not supported");
 		return false;
 	}
 
