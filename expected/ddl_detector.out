@@ -16,3 +16,9 @@ SELECT * FROM pg_logical_slot_get_changes('test', NULL, NULL, 'include-xids', '0
 (3 rows)
 
 DROP TABLE foo;
+SELECT * FROM pg_drop_replication_slot('test');
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+

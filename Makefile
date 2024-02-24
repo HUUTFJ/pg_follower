@@ -1,4 +1,9 @@
-MODULES = ddl_detector
+MODULE_big = ddl_detector
+
+OBJS = \
+	$(WIN32RES) \
+	ddl_detector.o \
+	ddl_detector_output.o
 
 EXTENSION = ddl_detector
 DATA = ddl_detector--1.0.sql
@@ -8,7 +13,7 @@ PGFILEDESC = " ddl_detector - minimal DDL detector"
 
 EXTRA_INSTALL=contrib/test_decoding
 REGRESS_OPTS = --temp-config ./logical.conf
-REGRESS = ddl_detector
+REGRESS = ddl_detector ddl_detector_output
 
 ifdef USE_PGXS
 PG_CONFIG = pg_config

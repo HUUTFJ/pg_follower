@@ -1,6 +1,5 @@
-CREATE EXTENSION ddl_detector;
 
-SELECT * FROM pg_create_logical_replication_slot('test', 'test_decoding');
+SELECT * FROM pg_create_logical_replication_slot('test', 'ddl_detector');
 
 CREATE TABLE IF NOT EXISTS foo (id int, data text, value real);
 

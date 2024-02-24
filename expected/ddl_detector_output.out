@@ -1,0 +1,22 @@
+SELECT * FROM pg_create_logical_replication_slot('test', 'ddl_detector');
+ slot_name |    lsn    
+-----------+-----------
+ test      | 0/191E408
+(1 row)
+
+CREATE TABLE IF NOT EXISTS foo (id int, data text, value real);
+INFO:  deparse result: CREATE TABLE IF NOT EXISTS public.foo ( id pg_catalog.int4, data text, value pg_catalog.float4 );
+SELECT * FROM pg_logical_slot_get_changes('test', NULL, NULL, 'include-xids', '0');
+    lsn    | xid |  data   
+-----------+-----+---------
+ 0/191E478 | 743 | BEGIN;
+ 0/1921D58 | 743 | COMMIT;
+(2 rows)
+
+DROP TABLE foo;
+SELECT * FROM pg_drop_replication_slot('test');
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
