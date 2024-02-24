@@ -1,5 +1,5 @@
 CREATE EXTENSION ddl_detector;
 
-CREATE TABLE foo AS (SELECT 1 FROM generate_series(1, 10));
+CREATE TABLE foo (id int, data text, value real);
 
-SELECT * FROM foo;
+DROP TABLE foo;

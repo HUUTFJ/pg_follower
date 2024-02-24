@@ -1,17 +1,4 @@
 CREATE EXTENSION ddl_detector;
-CREATE TABLE foo AS (SELECT 1 FROM generate_series(1, 10));
-SELECT * FROM foo;
- ?column? 
-----------
-        1
-        1
-        1
-        1
-        1
-        1
-        1
-        1
-        1
-        1
-(10 rows)
-
+CREATE TABLE foo (id int, data text, value real);
+INFO:  deparse result: CREATE TABLE public.foo ( id pg_catalog.int4, data text, value pg_catalog.float4 );
+DROP TABLE foo;
