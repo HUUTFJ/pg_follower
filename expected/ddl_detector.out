@@ -1,4 +1,4 @@
 CREATE EXTENSION ddl_detector;
-CREATE TABLE foo (id int, data text, value real);
-INFO:  deparse result: CREATE TABLE public.foo ( id pg_catalog.int4, data text, value pg_catalog.float4 );
+CREATE TABLE IF NOT EXISTS foo (id int, data text, value real);
+INFO:  deparse result: CREATE TABLE IF NOT EXISTS public.foo ( id pg_catalog.int4, data text, value pg_catalog.float4 );
 DROP TABLE foo;

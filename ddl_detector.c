@@ -88,7 +88,8 @@ deparse_createstmt(CreateStmt *stmt)
 	bool			first_try = true;
 
 	initStringInfo(&deparsed);
-	appendStringInfo(&deparsed, "CREATE TABLE %s.%s ( ",
+	appendStringInfo(&deparsed, "CREATE TABLE %s %s.%s ( ",
+					 stmt->if_not_exists ? "IF NOT EXISTS" : "",
 					 stmt->relation->schemaname, stmt->relation->relname);
 
 	foreach(lc, stmt->tableElts)

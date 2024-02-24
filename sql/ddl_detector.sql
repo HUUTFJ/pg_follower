@@ -1,5 +1,5 @@
 CREATE EXTENSION ddl_detector;
 
-CREATE TABLE foo (id int, data text, value real);
+CREATE TABLE IF NOT EXISTS foo (id int, data text, value real);
 
 DROP TABLE foo;
