@@ -1,4 +1,18 @@
 CREATE EXTENSION ddl_detector;
+SELECT * FROM pg_create_logical_replication_slot('test', 'test_decoding');
+ slot_name |    lsn    
+-----------+-----------
+ test      | 0/1917FE0
+(1 row)
+
 CREATE TABLE IF NOT EXISTS foo (id int, data text, value real);
 INFO:  deparse result: CREATE TABLE IF NOT EXISTS public.foo ( id pg_catalog.int4, data text, value pg_catalog.float4 );
+SELECT * FROM pg_logical_slot_get_changes('test', NULL, NULL, 'include-xids', '0');
+    lsn    | xid |                                                                               data                                                                               
+-----------+-----+------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 0/1918028 | 741 | BEGIN
+ 0/191C708 | 741 | message: transactional: 1 prefix: ddl_detector, sz: 97 content:CREATE TABLE IF NOT EXISTS public.foo ( id pg_catalog.int4, data text, value pg_catalog.float4 );
+ 0/191CB70 | 741 | COMMIT
+(3 rows)
+
 DROP TABLE foo;

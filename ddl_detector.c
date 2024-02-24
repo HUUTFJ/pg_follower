@@ -20,6 +20,7 @@
 #include "commands/event_trigger.h"
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
+#include "replication/message.h"
 
 PG_MODULE_MAGIC;
 
@@ -157,6 +158,11 @@ test_function(PG_FUNCTION_ARGS)
 	query = deparse_createstmt((CreateStmt *)trigdata->parsetree);
 
 	elog(INFO, "deparse result: %s", query);
+
+	/* Emit the result to the log. */
+	LogLogicalMessage("ddl_detector", query, strlen(query), true, false);
+
+	pfree(query);
 
 	PG_RETURN_NULL();
 }

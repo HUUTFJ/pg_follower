@@ -4,6 +4,10 @@ EXTENSION = ddl_detector
 DATA = ddl_detector--1.0.sql
 PGFILEDESC = " ddl_detector - minimal DDL detector"
 
+# Settings for the regression test
+
+EXTRA_INSTALL=contrib/test_decoding
+REGRESS_OPTS = --temp-config ./logical.conf
 REGRESS = ddl_detector
 
 ifdef USE_PGXS
