@@ -1,7 +1,7 @@
-SELECT * FROM pg_create_logical_replication_slot('test', 'ddl_detector');
- slot_name |    lsn    
------------+-----------
- test      | 0/191E408
+SELECT slot_name FROM pg_create_logical_replication_slot('test', 'ddl_detector');
+ slot_name 
+-----------
+ test
 (1 row)
 
 CREATE TABLE foo (id int, data text);
@@ -11,16 +11,16 @@ INSERT INTO foo VALUES (1, 'test data');
 UPDATE foo SET id = 2 WHERE id = 1;
 DELETE FROM foo;
 COMMIT;
-SELECT * FROM pg_logical_slot_get_changes('test', NULL, NULL, 'include-xids', '0');
-    lsn    | xid |                              data                              
------------+-----+----------------------------------------------------------------
- 0/191E478 | 743 | BEGIN;
- 0/1921BB8 | 743 | COMMIT;
- 0/1921BB8 | 744 | BEGIN;
- 0/1921BB8 | 744 | INSERT INTO public.foo ( id, data ) VALUES ( 1, 'test data' );
- 0/1921C00 | 744 | UPDATE public.foo SET 
- 0/1921C50 | 744 | DELETE FROM public.foo 
- 0/1921CB8 | 744 | COMMIT;
+SELECT data FROM pg_logical_slot_get_changes('test', NULL, NULL, 'include-xids', '0');
+                              data                              
+----------------------------------------------------------------
+ BEGIN;
+ COMMIT;
+ BEGIN;
+ INSERT INTO public.foo ( id, data ) VALUES ( 1, 'test data' );
+ UPDATE public.foo SET 
+ DELETE FROM public.foo 
+ COMMIT;
 (7 rows)
 
 DROP TABLE foo;

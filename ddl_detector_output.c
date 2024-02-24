@@ -286,8 +286,6 @@ detector_message(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 
 }
 
-/* Public routines */
-
 /* Specify output plugin callbacks */
 void
 _PG_output_plugin_init(OutputPluginCallbacks *cb)
