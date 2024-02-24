@@ -1,2 +1,2 @@
 
-SELECT * FROM start_catchup();
+SELECT * FROM start_catchup('host=localhost port=0');

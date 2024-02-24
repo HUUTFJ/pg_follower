@@ -3,8 +3,8 @@
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION ddl_detector" to load this file. \quit
 
-CREATE FUNCTION start_catchup()
-RETURNS boolean
+CREATE FUNCTION start_catchup(text)
+RETURNS void
 AS 'MODULE_PATHNAME'
 PARALLEL RESTRICTED
 LANGUAGE C;

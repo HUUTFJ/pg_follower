@@ -1,6 +1,6 @@
-SELECT * FROM start_catchup();
+SELECT * FROM start_catchup('host=localhost port=0');
  start_catchup 
 ---------------
- t
+ 
 (1 row)
 
