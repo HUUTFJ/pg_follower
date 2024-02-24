@@ -1,0 +1,6 @@
+SELECT * FROM start_catchup();
+ start_catchup 
+---------------
+ t
+(1 row)
+
