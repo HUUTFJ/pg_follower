@@ -1,11 +1,11 @@
 /*-------------------------------------------------------------------------
  *
- * detect_ddl.c
+ * ddl_detector.c
  *		Minimal DDL detector
  *
  *
  * IDENTIFICATION
- *		  detect_ddl/detect_ddl.c
+ *		ddl_detector/ddl_detector.c
  *
  *-------------------------------------------------------------------------
  */

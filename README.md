@@ -1,4 +1,4 @@
-# detect_ddl - Minimal DDL detector
+# ddl_detector - Minimal DDL detector
 
 ## Overview
 

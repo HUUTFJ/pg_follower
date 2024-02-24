@@ -1,7 +1,7 @@
-/* detect_ddl/detect_ddl--1.0.sql */
+/* ddl_detector/ddl_detector--1.0.sql */
 
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
-\echo Use "CREATE EXTENSION detect_ddl" to load this file. \quit
+\echo Use "CREATE EXTENSION ddl_detector" to load this file. \quit
 
 -- Trigger function
 CREATE FUNCTION test_function()

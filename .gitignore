@@ -7,3 +7,5 @@ log/
 
 regression.diffs
 regression.out
+
+.vscode/
