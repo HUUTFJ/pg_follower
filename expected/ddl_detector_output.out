@@ -4,14 +4,24 @@ SELECT * FROM pg_create_logical_replication_slot('test', 'ddl_detector');
  test      | 0/191E408
 (1 row)
 
-CREATE TABLE IF NOT EXISTS foo (id int, data text, value real);
-INFO:  deparse result: CREATE TABLE IF NOT EXISTS public.foo ( id pg_catalog.int4, data text, value pg_catalog.float4 );
+CREATE TABLE foo (id int);
+INFO:  deparse result: CREATE TABLE  public.foo ( id pg_catalog.int4 );
+BEGIN;
+INSERT INTO foo VALUES (1);
+UPDATE foo SET id = 2 WHERE id = 1;
+DELETE FROM foo;
+COMMIT;
 SELECT * FROM pg_logical_slot_get_changes('test', NULL, NULL, 'include-xids', '0');
-    lsn    | xid |  data   
------------+-----+---------
+    lsn    | xid |   data   
+-----------+-----+----------
  0/191E478 | 743 | BEGIN;
- 0/1921D58 | 743 | COMMIT;
-(2 rows)
+ 0/191F9E8 | 743 | COMMIT;
+ 0/191F9E8 | 744 | BEGIN;
+ 0/191F9E8 | 744 | INSERTED
+ 0/191FA28 | 744 | UPDATED
+ 0/191FA70 | 744 | DELETED
+ 0/191FAD8 | 744 | COMMIT;
+(7 rows)
 
 DROP TABLE foo;
 SELECT * FROM pg_drop_replication_slot('test');

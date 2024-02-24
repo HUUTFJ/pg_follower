@@ -14,6 +14,17 @@
 
 extern void _PG_init(void);
 
+/* Support routines */
+static void output_insert(StringInfo out,
+						  Relation relation,
+						  ReorderBufferChange *change);
+static void output_update(StringInfo out,
+						  Relation relation,
+						  ReorderBufferChange *change);
+static void output_delete(StringInfo out,
+						  Relation relation,
+						  ReorderBufferChange *change);
+
 /* Callback routines */
 static void detector_startup(LogicalDecodingContext *ctx,
 							 OutputPluginOptions *options,
@@ -52,10 +63,48 @@ detector_begin(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 }
 
 static void
+output_insert(StringInfo out, Relation relation, ReorderBufferChange *change)
+{
+	appendStringInfoString(out, "INSERTED");
+}
+
+static void
+output_update(StringInfo out, Relation relation, ReorderBufferChange *change)
+{
+	appendStringInfoString(out, "UPDATED");
+}
+
+static void
+output_delete(StringInfo out, Relation relation, ReorderBufferChange *change)
+{
+	appendStringInfoString(out, "DELETED");
+}
+
+static void
 detector_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 				Relation relation, ReorderBufferChange *change)
 {
-
+	switch (change->action)
+	{
+		case REORDER_BUFFER_CHANGE_INSERT:
+			OutputPluginPrepareWrite(ctx, true);
+			output_insert(ctx->out, relation, change);
+			OutputPluginWrite(ctx, true);
+			break;
+		case REORDER_BUFFER_CHANGE_UPDATE:
+			OutputPluginPrepareWrite(ctx, true);
+			output_update(ctx->out, relation, change);
+			OutputPluginWrite(ctx, true);
+			break;
+		case REORDER_BUFFER_CHANGE_DELETE:
+			OutputPluginPrepareWrite(ctx, true);
+			output_delete(ctx->out, relation, change);
+			OutputPluginWrite(ctx, true);
+			break;
+		default:
+			elog(ERROR, "unknown change");
+			break;
+	}
 }
 
 static void
