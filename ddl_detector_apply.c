@@ -32,11 +32,15 @@ static bool start_bgworker(const char *connection_string);
 static void ddl_init_shmem(void *ptr);
 static void ddl_attach_shmem(bool require_found);
 static void create_replication_slot(WalReceiverConn *conn);
+static void start_streaming(WalReceiverConn *conn);
 
 static uint32 ddl_detector_we_main = 0;
 
 /* Determine the max length for the connection string */
 #define MAXCONNSTRING 1024
+
+/* Determine name of used replication slot */
+#define DDW_SLOT_NAME "ddl_detector_tmp_slot"
 
 /* Shared state information for ddl_detector bgworker. */
 typedef struct
@@ -59,13 +63,13 @@ create_replication_slot(WalReceiverConn *conn)
 {
 #define CREATE_SLOT_OUTPUT_COL_COUNT 4
 	StringInfoData 	query;
-	Oid			   	slotRow[CREATE_SLOT_OUTPUT_COL_COUNT] = {TEXTOID, TEXTOID,
+	Oid				slot_row[CREATE_SLOT_OUTPUT_COL_COUNT] = {TEXTOID, TEXTOID,
 															 TEXTOID, TEXTOID};
 	bool			started_tx = false;
 
 	initStringInfo(&query);
-	appendStringInfoString(&query, "CREATE_REPLICATION_SLOT ddl_detector_tmp_slot "
-								   "TEMPORARY LOGICAL ddl_detector;");
+	appendStringInfoString(&query, "CREATE_REPLICATION_SLOT " DDW_SLOT_NAME
+								   " TEMPORARY LOGICAL ddl_detector;");
 
 	/* The syscache access in walrcv_exec() needs a transaction env. */
 	if (!IsTransactionState())
@@ -74,7 +78,43 @@ create_replication_slot(WalReceiverConn *conn)
 		started_tx = true;
 	}
 
-	walrcv_exec(conn, query.data, CREATE_SLOT_OUTPUT_COL_COUNT, slotRow);
+	walrcv_exec(conn, query.data, CREATE_SLOT_OUTPUT_COL_COUNT, slot_row);
+
+	if (started_tx)
+		CommitTransactionCommand();
+
+	pfree(query.data);
+}
+
+/*
+ * Start streaming data from upstream.
+ *
+ * walrcv_startstreaming() macro cannot be used becasue it requires to specify
+ * the name of publications.
+ */
+static void
+start_streaming(WalReceiverConn *conn)
+{
+	StringInfoData 	query;
+	bool			started_tx;
+
+	initStringInfo(&query);
+
+	/* The syscache access in walrcv_exec() needs a transaction env. */
+	if (!IsTransactionState())
+	{
+		StartTransactionCommand();
+		started_tx = true;
+	}
+
+	appendStringInfoString(&query, "START_REPLICATION SLOT " DDW_SLOT_NAME
+								   " LOGICAL 0/0 ;");
+
+	/*
+	 * Since START_REPLICATION returns PGRES_COPY_BOTH response, no need to
+	 * prepare nRetTypes and retTypes.
+	 */
+	walrcv_exec(conn, query.data, 0, NULL);
 
 	if (started_tx)
 		CommitTransactionCommand();
@@ -119,6 +159,9 @@ ddl_detector_worker_main(Datum main_arg)
 
 	/* Create a replication slot */
 	create_replication_slot(ddw_walrcv_conn);
+
+	/* Start streaming */
+	start_streaming(ddw_walrcv_conn);
 
 	for (;;)
 	{

@@ -40,7 +40,7 @@ $upstream->poll_query_until(
 my $result = $upstream->safe_psql(
 	'postgres', "SELECT datname FROM pg_stat_activity WHERE application_name = 'ddl_detector worker'
 ");
-is($result, "postgres");
+is($result, "postgres", "check the worker connects to the postgres database");
 
 # Confirm a new replication slot was created
 $upstream->poll_query_until(
@@ -51,10 +51,13 @@ $upstream->poll_query_until(
 $result = $upstream->safe_psql(
 	'postgres', "SELECT slot_name, plugin, slot_type, database, temporary FROM pg_replication_slots;
 ");
-is($result, "ddl_detector_tmp_slot|ddl_detector|logical|postgres|t");
+is($result, "ddl_detector_tmp_slot|ddl_detector|logical|postgres|t",
+   "check the replication stop has appropriate profiles");
 
-# Shutdown both nodes
-$upstream->stop;
+# Shutdown both nodes.
+# XXX: The downstream must be stopped first because the worker won't consume
+# any changes yet.
 $downstream->stop;
+$upstream->stop;
 
 done_testing();
