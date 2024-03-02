@@ -1,9 +1,8 @@
 
 SELECT slot_name FROM pg_create_logical_replication_slot('test', 'ddl_detector');
 
-CREATE TABLE foo (id int, data text);
-
 BEGIN;
+CREATE TABLE foo (id int, data text);
 INSERT INTO foo VALUES (1, 'test data');
 UPDATE foo SET id = 2 WHERE id = 1;
 DELETE FROM foo;

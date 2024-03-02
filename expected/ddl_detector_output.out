@@ -4,9 +4,9 @@ SELECT slot_name FROM pg_create_logical_replication_slot('test', 'ddl_detector')
  test
 (1 row)
 
+BEGIN;
 CREATE TABLE foo (id int, data text);
 INFO:  deparse result: CREATE TABLE  public.foo ( id pg_catalog.int4, data text );
-BEGIN;
 INSERT INTO foo VALUES (1, 'test data');
 UPDATE foo SET id = 2 WHERE id = 1;
 DELETE FROM foo;
@@ -15,13 +15,12 @@ SELECT data FROM pg_logical_slot_get_changes('test', NULL, NULL, 'include-xids',
                               data                              
 ----------------------------------------------------------------
  BEGIN;
- COMMIT;
- BEGIN;
+ CREATE TABLE  public.foo ( id pg_catalog.int4, data text );
  INSERT INTO public.foo ( id, data ) VALUES ( 1, 'test data' );
  UPDATE public.foo SET 
  DELETE FROM public.foo 
  COMMIT;
-(7 rows)
+(6 rows)
 
 DROP TABLE foo;
 SELECT * FROM pg_drop_replication_slot('test');

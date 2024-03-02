@@ -109,7 +109,7 @@ detector_begin(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 {
 	OutputPluginPrepareWrite(ctx, true);
 
-	appendStringInfo(ctx->out, "BEGIN;");
+	appendStringInfoString(ctx->out, "BEGIN;");
 
 	OutputPluginWrite(ctx, true);
 }
@@ -273,7 +273,7 @@ detector_commit(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 {
 	OutputPluginPrepareWrite(ctx, true);
 
-	appendStringInfo(ctx->out, "COMMIT;");
+	appendStringInfoString(ctx->out, "COMMIT;");
 
 	OutputPluginWrite(ctx, true);
 }
@@ -283,7 +283,16 @@ detector_message(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 				 XLogRecPtr message_lsn, bool transactional,
 				 const char *prefix, Size message_size, const char *message)
 {
+	/* Skip if the message is not related with ddl_detector */
+	if (strcmp(prefix, "ddl_detector") != 0)
+		return;
 
+	/* DDL command must be transported as transactional message */
+	Assert(transactional);
+
+	OutputPluginPrepareWrite(ctx, true);
+	appendBinaryStringInfo(ctx->out, message, message_size);
+	OutputPluginWrite(ctx, true);
 }
 
 /* Specify output plugin callbacks */
