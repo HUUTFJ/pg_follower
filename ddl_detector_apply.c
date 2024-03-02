@@ -12,9 +12,11 @@
 #include "fmgr.h"
 
 #include "access/xlog.h"
+#include "lib/stringinfo.h"
 #include "miscadmin.h"
 #include "postmaster/bgworker.h"
 #include "postmaster/interrupt.h"
+#include "replication/walreceiver.h"
 #include "storage/dsm_registry.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
@@ -29,6 +31,7 @@ PGDLLEXPORT void ddl_detector_worker_main(Datum main_arg);
 static bool start_bgworker(const char *connection_string);
 static void ddl_init_shmem(void *ptr);
 static void ddl_attach_shmem(bool require_found);
+static void create_replication_slot(WalReceiverConn *conn);
 
 static uint32 ddl_detector_we_main = 0;
 
@@ -45,10 +48,47 @@ typedef struct
 /* Pointer to shared-memory state. */
 static ddl_detector_shared_state *ddw_state;
 
+/*
+ * Create a logical replication slot to the upstream node.
+ *
+ * walrcv_create_slot() macro cannot be used becasue it cannot create with an
+ * arbitrary logical decoding output plugin.
+ */
+static void
+create_replication_slot(WalReceiverConn *conn)
+{
+#define CREATE_SLOT_OUTPUT_COL_COUNT 4
+	StringInfoData 	query;
+	Oid			   	slotRow[CREATE_SLOT_OUTPUT_COL_COUNT] = {TEXTOID, TEXTOID,
+															 TEXTOID, TEXTOID};
+	bool			started_tx = false;
+
+	initStringInfo(&query);
+	appendStringInfoString(&query, "CREATE_REPLICATION_SLOT ddl_detector_tmp_slot "
+								   "TEMPORARY LOGICAL ddl_detector;");
+
+	/* The syscache access in walrcv_exec() needs a transaction env. */
+	if (!IsTransactionState())
+	{
+		StartTransactionCommand();
+		started_tx = true;
+	}
+
+	walrcv_exec(conn, query.data, CREATE_SLOT_OUTPUT_COL_COUNT, slotRow);
+
+	if (started_tx)
+		CommitTransactionCommand();
+
+	pfree(query.data);
+}
+
 void
 ddl_detector_worker_main(Datum main_arg)
 {
-	Oid		database_oid;
+	Oid					database_oid;
+	char			   *connection_string;
+	WalReceiverConn	   *ddw_walrcv_conn = NULL;
+	char			   *err;
 
 	/* Do we have to define signal handlers? */
 	BackgroundWorkerUnblockSignals();
@@ -58,13 +98,27 @@ ddl_detector_worker_main(Datum main_arg)
 
 	/* And accept information */
 	database_oid = ddw_state->local_database_oid;
-
-	/* Connect to a local database */
-	BackgroundWorkerInitializeConnectionByOid(database_oid, InvalidOid, 0);
+	connection_string = pstrdup(ddw_state->connection_string);
 
 	/* Allocate or get the custom wait event */
 	if (ddl_detector_we_main == 0)
 		ddl_detector_we_main = WaitEventExtensionNew("DdlDetectorWorkerMain");
+
+	/* Connect to a local database */
+	BackgroundWorkerInitializeConnectionByOid(database_oid, InvalidOid, 0);
+
+	/* Load the libpq-specific functions */
+	load_file("libpqwalreceiver", false);
+
+	/* Connect to the upstream */
+	ddw_walrcv_conn = walrcv_connect(connection_string, true, true, false,
+									 "ddl_detector worker", &err);
+
+	if (ddw_walrcv_conn == NULL)
+		elog(ERROR, "could not connect to the upstream: %s", err);
+
+	/* Create a replication slot */
+	create_replication_slot(ddw_walrcv_conn);
 
 	for (;;)
 	{
