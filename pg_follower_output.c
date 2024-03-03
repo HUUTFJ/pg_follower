@@ -1,9 +1,10 @@
 /*-------------------------------------------------------------------------
  *
- * ddl_detector_output.c
- *
+ * pg_follower_output.c
+ *		logical decoding output plugin
+ * 
  * IDENTIFICATION
- *		ddl_detector/ddl_detector_output.c
+ *		pg_follower/pg_follower_output.c
  *
  *-------------------------------------------------------------------------
  */
@@ -24,18 +25,18 @@ static void output_delete(StringInfo out, Relation relation, char *schema_name,
 						  ReorderBufferChange *change);
 
 /* Callback routines */
-static void detector_startup(LogicalDecodingContext *ctx,
+static void follower_startup(LogicalDecodingContext *ctx,
 							 OutputPluginOptions *options,
 							 bool is_init);
-static void detector_begin(LogicalDecodingContext *ctx, ReorderBufferTXN *txn);
-static void detector_change(LogicalDecodingContext *ctx,
+static void follower_begin(LogicalDecodingContext *ctx, ReorderBufferTXN *txn);
+static void follower_change(LogicalDecodingContext *ctx,
 							ReorderBufferTXN *txn,
 							Relation relation,
 							ReorderBufferChange *change);
-static void detector_commit(LogicalDecodingContext *ctx,
+static void follower_commit(LogicalDecodingContext *ctx,
 							ReorderBufferTXN *txn,
 							XLogRecPtr commit_lsn);
-static void detector_message(LogicalDecodingContext *ctx,
+static void follower_message(LogicalDecodingContext *ctx,
 							 ReorderBufferTXN *txn,
 							 XLogRecPtr message_lsn,
 							 bool transactional,
@@ -95,23 +96,6 @@ print_literal(StringInfo s, Oid typid, char *outputstr)
 			appendStringInfoChar(s, '\'');
 			break;
 	}
-}
-
-static void
-detector_startup(LogicalDecodingContext *ctx, OutputPluginOptions *options,
-				 bool is_init)
-{
-	options->output_type = OUTPUT_PLUGIN_TEXTUAL_OUTPUT;
-}
-
-static void
-detector_begin(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
-{
-	OutputPluginPrepareWrite(ctx, true);
-
-	appendStringInfoString(ctx->out, "BEGIN;");
-
-	OutputPluginWrite(ctx, true);
 }
 
 /*
@@ -202,46 +186,85 @@ output_insert(StringInfo out, Relation relation, char *schema_name,
 	pfree(schema_name);
 }
 
+/*
+ * Construct an UPDATE query. Not implemented yet.
+ */
 static void
 output_update(StringInfo out, Relation relation, char *schema_name,
 			  ReorderBufferChange *change)
 {
-	HeapTuple old_tuple;
-	HeapTuple new_tuple;
+	// HeapTuple old_tuple;
+	// HeapTuple new_tuple;
 
 	Assert(change->action == REORDER_BUFFER_CHANGE_UPDATE);
 
-	/* Extract information from arguments */
-	old_tuple = change->data.tp.oldtuple;
-	new_tuple = change->data.tp.newtuple;
+	// /* Extract information from arguments */
+	// old_tuple = change->data.tp.oldtuple;
+	// new_tuple = change->data.tp.newtuple;
 
 	/* Construction the query */
 	appendStringInfo(out, "UPDATE %s.%s SET ", schema_name,
 					 RelationGetRelationName(relation));
 }
 
+/*
+ * Construct a DELETE query. Not implemented yet.
+ */
 static void
 output_delete(StringInfo out, Relation relation, char *schema_name,
 			  ReorderBufferChange *change)
 {
-	HeapTuple old_tuple;
+	// HeapTuple old_tuple;
 
 	Assert(change->action == REORDER_BUFFER_CHANGE_DELETE);
 
-	/* Extract information from arguments */
-	old_tuple = change->data.tp.oldtuple;
+	// /* Extract information from arguments */
+	// old_tuple = change->data.tp.oldtuple;
 
 	/* Construction the query */
 	appendStringInfo(out, "DELETE FROM %s.%s ", schema_name,
 					 RelationGetRelationName(relation));
 }
 
+/* Callback routines */
+
+/*
+ * Startup callback which is called whenever a replication slot is created.
+ *
+ * output_plugin_options is not validated here because this module won't use.
+ */
 static void
-detector_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
+follower_startup(LogicalDecodingContext *ctx, OutputPluginOptions *options,
+				 bool is_init)
+{
+	options->output_type = OUTPUT_PLUGIN_TEXTUAL_OUTPUT;
+}
+
+/*
+ * BEGIN callback which is called whenever a start of a committed transaction
+ * has been decoded.
+ */
+static void
+follower_begin(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
+{
+	OutputPluginPrepareWrite(ctx, true);
+
+	appendStringInfoString(ctx->out, "BEGIN;");
+
+	OutputPluginWrite(ctx, true);
+}
+
+/*
+ * Change callback which is called for every individual row modification
+ * inside a transaction.
+ */
+static void
+follower_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 				Relation relation, ReorderBufferChange *change)
 {
 	char *schema_name = get_namespace_name(RelationGetNamespace(relation));
 
+	/* Swtich based on the actual action */
 	switch (change->action)
 	{
 		case REORDER_BUFFER_CHANGE_INSERT:
@@ -267,8 +290,12 @@ detector_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 	pfree(schema_name);
 }
 
+/*
+ * COMMIT callback which is called whenever a transaction commit has been
+ * decoded.
+ */
 static void
-detector_commit(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
+follower_commit(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 				XLogRecPtr commit_lsn)
 {
 	OutputPluginPrepareWrite(ctx, true);
@@ -278,18 +305,25 @@ detector_commit(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 	OutputPluginWrite(ctx, true);
 }
 
+/*
+ * COMMIT callback which is called whenever a logical decoding message has been
+ * decoded.
+ *
+ * In terms of pg_follower, DDL commands would be recorded as logical message.
+ */
 static void
-detector_message(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
+follower_message(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 				 XLogRecPtr message_lsn, bool transactional,
 				 const char *prefix, Size message_size, const char *message)
 {
-	/* Skip if the message is not related with ddl_detector */
-	if (strcmp(prefix, "ddl_detector") != 0)
+	/* Skip if the message is not related with pg_follower */
+	if (strcmp(prefix, "pg_follower") != 0)
 		return;
 
 	/* DDL command must be transported as transactional message */
 	Assert(transactional);
 
+	/* Replicate the given message as-is */
 	OutputPluginPrepareWrite(ctx, true);
 	appendBinaryStringInfo(ctx->out, message, message_size);
 	OutputPluginWrite(ctx, true);
@@ -301,9 +335,9 @@ _PG_output_plugin_init(OutputPluginCallbacks *cb)
 {
 	AssertVariableIsOfType(&_PG_output_plugin_init, LogicalOutputPluginInit);
 
-	cb->startup_cb = detector_startup;
-	cb->begin_cb = detector_begin;
-	cb->change_cb = detector_change;
-	cb->commit_cb = detector_commit;
-	cb->message_cb = detector_message;
+	cb->startup_cb = follower_startup;
+	cb->begin_cb = follower_begin;
+	cb->change_cb = follower_change;
+	cb->commit_cb = follower_commit;
+	cb->message_cb = follower_message;
 }

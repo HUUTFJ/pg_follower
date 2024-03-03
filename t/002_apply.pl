@@ -13,33 +13,33 @@ my $upstream = PostgreSQL::Test::Cluster->new('upstream');
 $upstream->init(allows_streaming => 'logical');
 $upstream->start;
 
-# Install the ddl_detector extension
-$upstream->safe_psql('postgres', "CREATE EXTENSION ddl_detector;");
+# Install the pg_follower extension
+$upstream->safe_psql('postgres', "CREATE EXTENSION pg_follower;");
 
 # Setup downstream as well
 my $downstream = PostgreSQL::Test::Cluster->new('downstream');
 $downstream->init();
 # $downstream->append_conf('postgresql.conf', "log_min_messages = debug1");
 $downstream->start;
-$downstream->safe_psql('postgres', "CREATE EXTENSION ddl_detector;");
+$downstream->safe_psql('postgres', "CREATE EXTENSION pg_follower;");
 
-# Call start_catchup() for starting a worker
+# Call start_follow() for starting a worker
 my $upstream_connstr = $upstream->connstr . ' dbname=postgres';
-$downstream->safe_psql('postgres', "SELECT * FROM start_catchup('$upstream_connstr')");
+$downstream->safe_psql('postgres', "SELECT * FROM start_follow('$upstream_connstr')");
 
 # Wait until the worker would be started
 $downstream->poll_query_until(
-	'postgres', "SELECT count(1) = 1 FROM pg_stat_activity WHERE wait_event = 'DdlDetectorWorkerMain'"
+	'postgres', "SELECT count(1) = 1 FROM pg_stat_activity WHERE wait_event = 'PgFollowerWorkerMain'"
 ) or die "Timed out while waiting worker to be started";
 
 # Wait until the worker connect to the upstream node
 $upstream->poll_query_until(
-	'postgres', "SELECT count(1) = 1 FROM pg_stat_activity WHERE application_name = 'ddl_detector worker'"
+	'postgres', "SELECT count(1) = 1 FROM pg_stat_activity WHERE application_name = 'pg_follower worker'"
 ) or die "Timed out while waiting worker to connect to the upstream";
 
 # Confirm the worker connects to the upstream's postgres database
 my $result = $upstream->safe_psql(
-	'postgres', "SELECT datname FROM pg_stat_activity WHERE application_name = 'ddl_detector worker'
+	'postgres', "SELECT datname FROM pg_stat_activity WHERE application_name = 'pg_follower worker'
 ");
 is($result, "postgres", "check the worker connects to the postgres database");
 
@@ -52,7 +52,7 @@ $upstream->poll_query_until(
 $result = $upstream->safe_psql(
 	'postgres', "SELECT slot_name, plugin, slot_type, database, temporary FROM pg_replication_slots;
 ");
-is($result, "ddl_detector_tmp_slot|ddl_detector|logical|postgres|t",
+is($result, "pg_follower_tmp_slot|pg_follower|logical|postgres|t",
    "check the replication stop has appropriate profiles");
 
 # Create a table and insert tuples to it

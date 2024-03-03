@@ -13,12 +13,12 @@ my $node = PostgreSQL::Test::Cluster->new('test');
 $node->init(allows_streaming => 'logical');
 $node->start;
 
-# Install the ddl_detector extension
-$node->safe_psql('postgres', "CREATE EXTENSION ddl_detector;");
+# Install the pg_follower extension
+$node->safe_psql('postgres', "CREATE EXTENSION pg_follower;");
 
 # Create a logical replication slot
 $node->safe_psql('postgres',
-	"SELECT slot_name FROM pg_create_logical_replication_slot('regression_slot1', 'ddl_detector');"
+	"SELECT slot_name FROM pg_create_logical_replication_slot('regression_slot1', 'pg_follower');"
 );
 
 # Create table

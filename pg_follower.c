@@ -1,11 +1,11 @@
 /*-------------------------------------------------------------------------
  *
- * ddl_detector.c
- *		Minimal DDL detector
+ * pg_follower.c
+ *		Capture changes and follow
  *
  *
  * IDENTIFICATION
- *		ddl_detector/ddl_detector.c
+ *		pg_follower/pg_follower.c
  *
  *-------------------------------------------------------------------------
  */
@@ -24,7 +24,7 @@
 
 PG_MODULE_MAGIC;
 
-PG_FUNCTION_INFO_V1(test_function);
+PG_FUNCTION_INFO_V1(detect_ddl);
 
 static bool verify_statement(CreateStmt *stmt);
 static char *deparse_createstmt(CreateStmt *stmt);
@@ -130,7 +130,7 @@ deparse_createstmt(CreateStmt *stmt)
  * Trigger function
  */
 Datum
-test_function(PG_FUNCTION_ARGS)
+detect_ddl(PG_FUNCTION_ARGS)
 {
 	EventTriggerData *trigdata;
 	char			 *query;
@@ -160,7 +160,7 @@ test_function(PG_FUNCTION_ARGS)
 	elog(DEBUG1, "deparse result: %s", query);
 
 	/* Emit the result to the log. */
-	LogLogicalMessage("ddl_detector", query, strlen(query), true, false);
+	LogLogicalMessage("pg_follower", query, strlen(query), true, false);
 
 	pfree(query);
 

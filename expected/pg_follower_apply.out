@@ -1,0 +1,6 @@
+SELECT * FROM start_follow('host=localhost port=0');
+ start_follow 
+--------------
+ 
+(1 row)
+

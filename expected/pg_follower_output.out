@@ -1,4 +1,4 @@
-SELECT slot_name FROM pg_create_logical_replication_slot('test', 'ddl_detector');
+SELECT slot_name FROM pg_create_logical_replication_slot('test', 'pg_follower');
  slot_name 
 -----------
  test

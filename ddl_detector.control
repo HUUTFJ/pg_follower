@@ -1,4 +1,0 @@
-comment = 'DDL detector'
-default_version = '1.0'
-module_pathname = '$libdir/ddl_detector'
-relocatable = true

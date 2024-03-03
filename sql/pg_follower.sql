@@ -1,4 +1,4 @@
-CREATE EXTENSION ddl_detector;
+CREATE EXTENSION pg_follower;
 
 SELECT slot_name FROM pg_create_logical_replication_slot('test', 'test_decoding');
 

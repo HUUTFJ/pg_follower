@@ -1,22 +1,21 @@
-MODULE_big = ddl_detector
+MODULE_big = pg_follower
 
 OBJS = \
 	$(WIN32RES) \
-	ddl_detector.o \
-	ddl_detector_apply.o \
-	ddl_detector_output.o
+	pg_follower.o \
+	pg_follower_apply.o \
+	pg_follower_output.o
 PG_CPPFLAGS = -I$(libpq_srcdir)
 SHLIB_LINK_INTERNAL = $(libpq)
 
-EXTENSION = ddl_detector
-DATA = ddl_detector--1.0.sql
-PGFILEDESC = " ddl_detector - minimal DDL detector"
+EXTENSION = pg_follower
+DATA = pg_follower--1.0.sql
+PGFILEDESC = " pg_follower - Capture changes and follow"
 
 # Settings for the regression test
-
 EXTRA_INSTALL=contrib/test_decoding
 REGRESS_OPTS = --temp-config ./logical.conf
-REGRESS = ddl_detector ddl_detector_output ddl_detector_apply
+REGRESS = pg_follower pg_follower_output pg_follower_apply
 
 TAP_TESTS = 1
 
@@ -25,7 +24,7 @@ PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
 else
-subdir = contrib/ddl_detector
+subdir = contrib/pg_follower
 top_builddir = ../..
 include $(top_builddir)/src/Makefile.global
 include $(top_srcdir)/contrib/contrib-global.mk

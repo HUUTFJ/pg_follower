@@ -1,5 +1,5 @@
 
-SELECT slot_name FROM pg_create_logical_replication_slot('test', 'ddl_detector');
+SELECT slot_name FROM pg_create_logical_replication_slot('test', 'pg_follower');
 
 BEGIN;
 CREATE TABLE foo (id int, data text);

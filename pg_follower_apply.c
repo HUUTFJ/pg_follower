@@ -1,9 +1,9 @@
 /*-------------------------------------------------------------------------
  *
- * ddl_detector_apply.c
+ * pg_follower_apply.c
  *
  * IDENTIFICATION
- *		ddl_detector/ddl_detector_apply.c
+ *		pg_follower/pg_follower_apply.c
  *
  *-------------------------------------------------------------------------
  */
@@ -29,12 +29,12 @@
 #include "utils/snapmgr.h"
 #include "utils/wait_event.h"
 
-PG_FUNCTION_INFO_V1(start_catchup);
+PG_FUNCTION_INFO_V1(start_follow);
 
-PGDLLEXPORT void ddl_detector_worker_main(Datum main_arg);
+PGDLLEXPORT void pg_follower_worker_main(Datum main_arg);
 static bool start_bgworker(const char *connection_string);
-static void ddl_init_shmem(void *ptr);
-static void ddl_attach_shmem(bool require_found);
+static void pfw_init_shmem(void *ptr);
+static void pfw_attach_shmem(bool require_found);
 static void create_replication_slot(WalReceiverConn *conn);
 static bool start_streaming(WalReceiverConn *conn);
 static void apply_loop(WalReceiverConn *conn);
@@ -42,29 +42,29 @@ static void apply_message(StringInfo message);
 static void send_feedback(WalReceiverConn *conn, XLogRecPtr recvpos, bool force,
 						  bool requestReply);
 
-static uint32 ddl_detector_we_main = 0;
+static uint32 pg_follower_we_main = 0;
 
 static MemoryContext message_context = NULL;
-static MemoryContext ddl_worker_context = NULL;
+static MemoryContext pfw_worker_context = NULL;
 
 /* Determine the max length for the connection string */
 #define MAXCONNSTRING 1024
 
 /* Determine name of used replication slot */
-#define DDW_SLOT_NAME "ddl_detector_tmp_slot"
+#define PFW_SLOT_NAME "pg_follower_tmp_slot"
 
 /* Determine name of used plugin */
-#define DDW_PLUGIN_NAME "ddl_detector"
+#define PFW_PLUGIN_NAME "pg_follower"
 
-/* Shared state information for ddl_detector bgworker. */
+/* Shared state information for pg_follower bgworker. */
 typedef struct
 {
 	Oid		local_database_oid;
 	char	connection_string[MAXCONNSTRING];
-} ddl_detector_shared_state;
+} pg_follower_shared_state;
 
 /* Pointer to shared-memory state. */
-static ddl_detector_shared_state *ddw_state;
+static pg_follower_shared_state *pfw_state;
 
 /*
  * Create a logical replication slot to the upstream node.
@@ -81,10 +81,6 @@ create_replication_slot(WalReceiverConn *conn)
 															 TEXTOID, TEXTOID};
 	bool			started_tx = false;
 
-	initStringInfo(&query);
-	appendStringInfo(&query, "CREATE_REPLICATION_SLOT %s TEMPORARY LOGICAL %s",
-					 DDW_SLOT_NAME, DDW_PLUGIN_NAME);
-
 	/* The syscache access in walrcv_exec() needs a transaction env. */
 	if (!IsTransactionState())
 	{
@@ -92,12 +88,21 @@ create_replication_slot(WalReceiverConn *conn)
 		started_tx = true;
 	}
 
+	/*
+	 * Construct a query. Any options could not be accepted now. Also, only
+	 * a temporary slot is supported.
+	 */
+	initStringInfo(&query);
+	appendStringInfo(&query, "CREATE_REPLICATION_SLOT %s TEMPORARY LOGICAL %s",
+					 PFW_SLOT_NAME, PFW_PLUGIN_NAME);
+
+	/* Execute the query */
 	walrcv_exec(conn, query.data, CREATE_SLOT_OUTPUT_COL_COUNT, slot_row);
+
+	pfree(query.data);
 
 	if (started_tx)
 		CommitTransactionCommand();
-
-	pfree(query.data);
 }
 
 /*
@@ -112,8 +117,6 @@ start_streaming(WalReceiverConn *conn)
 	StringInfoData 	query;
 	bool			started_tx;
 
-	initStringInfo(&query);
-
 	/* The syscache access in walrcv_exec() needs a transaction env. */
 	if (!IsTransactionState())
 	{
@@ -121,19 +124,24 @@ start_streaming(WalReceiverConn *conn)
 		started_tx = true;
 	}
 
+	/*
+	 * Construct a query. Any options could not be accepted now. Also, the
+	 * startpoint is always set to 0/0.
+	 */
+	initStringInfo(&query);
 	appendStringInfo(&query, "START_REPLICATION SLOT %s LOGICAL 0/0 ;",
-					 DDW_SLOT_NAME);
+					 PFW_SLOT_NAME);
 
 	/*
-	 * Since START_REPLICATION returns PGRES_COPY_BOTH response, no need to
-	 * prepare nRetTypes and retTypes.
+	 * Execute the query. Since START_REPLICATION returns PGRES_COPY_BOTH
+	 * response, no need to prepare nRetTypes and retTypes.
 	 */
 	walrcv_exec(conn, query.data, 0, NULL);
 
+	pfree(query.data);
+
 	if (started_tx)
 		CommitTransactionCommand();
-
-	pfree(query.data);
 
 	return true;
 }
@@ -190,7 +198,7 @@ send_feedback(WalReceiverConn *conn, XLogRecPtr recvpos, bool force,
 
 	if (!reply_message)
 	{
-		MemoryContext oldctx = MemoryContextSwitchTo(ddl_worker_context);
+		MemoryContext oldctx = MemoryContextSwitchTo(pfw_worker_context);
 
 		reply_message = makeStringInfo();
 		MemoryContextSwitchTo(oldctx);
@@ -267,7 +275,7 @@ apply_message(StringInfo message)
 }
 
 /*
- * main loop for the ddl worker
+ * main loop for the pg_follower worker
  *
  * XXX: basically ported from LogicalRepApplyLoop()
  */
@@ -278,8 +286,8 @@ apply_loop(WalReceiverConn *conn)
 	TimeLineID	tli;
 
 	/* Init the message_context which we clean up after each message */
-	message_context = AllocSetContextCreate(ddl_worker_context,
-											"ddl_worker_context",
+	message_context = AllocSetContextCreate(pfw_worker_context,
+											"pfw_worker_context",
 											ALLOCSET_DEFAULT_SIZES);
 
 	for (;;)
@@ -382,7 +390,7 @@ apply_loop(WalReceiverConn *conn)
 
 		/* Cleanup the memory. */
 		MemoryContextReset(message_context);
-		MemoryContextSwitchTo(ddl_worker_context);
+		MemoryContextSwitchTo(pfw_worker_context);
 
 		/* Check if we need to exit the streaming loop. */
 		if (endofstream)
@@ -393,7 +401,7 @@ apply_loop(WalReceiverConn *conn)
 							   WL_SOCKET_READABLE | WL_LATCH_SET |
 							   WL_TIMEOUT | WL_EXIT_ON_PM_DEATH,
 							   fd, 1000L,
-							   ddl_detector_we_main);
+							   pg_follower_we_main);
 
 		if (rc & WL_LATCH_SET)
 		{
@@ -413,12 +421,15 @@ apply_loop(WalReceiverConn *conn)
 	walrcv_endstreaming(conn, &tli);
 }
 
+/*
+ * Entrypoint for pg_follower worker
+ */
 void
-ddl_detector_worker_main(Datum main_arg)
+pg_follower_worker_main(Datum main_arg)
 {
 	Oid					database_oid;
 	char			   *connection_string;
-	WalReceiverConn	   *ddw_walrcv_conn = NULL;
+	WalReceiverConn	   *pfw_walrcv_conn = NULL;
 	char			   *err;
 
 	/* Setup signal handlers */
@@ -427,21 +438,21 @@ ddl_detector_worker_main(Datum main_arg)
 	BackgroundWorkerUnblockSignals();
 
 	/* Determine a memory context which is mainly used */
-	ddl_worker_context = AllocSetContextCreate(TopMemoryContext,
-											   "ddl_worker_context",
+	pfw_worker_context = AllocSetContextCreate(TopMemoryContext,
+											   "pfw_worker_context",
 											   ALLOCSET_DEFAULT_SIZES);
-	MemoryContextSwitchTo(ddl_worker_context);
+	MemoryContextSwitchTo(pfw_worker_context);
 
 	/* Attach the shared memory */
-	ddl_attach_shmem(true);
+	pfw_attach_shmem(true);
 
 	/* And accept information */
-	database_oid = ddw_state->local_database_oid;
-	connection_string = pstrdup(ddw_state->connection_string);
+	database_oid = pfw_state->local_database_oid;
+	connection_string = pstrdup(pfw_state->connection_string);
 
 	/* Allocate or get the custom wait event */
-	if (ddl_detector_we_main == 0)
-		ddl_detector_we_main = WaitEventExtensionNew("DdlDetectorWorkerMain");
+	if (pg_follower_we_main == 0)
+		pg_follower_we_main = WaitEventExtensionNew("PgFollowerWorkerMain");
 
 	/* Connect to a local database */
 	BackgroundWorkerInitializeConnectionByOid(database_oid, InvalidOid, 0);
@@ -450,30 +461,30 @@ ddl_detector_worker_main(Datum main_arg)
 	load_file("libpqwalreceiver", false);
 
 	/* Connect to the upstream */
-	ddw_walrcv_conn = walrcv_connect(connection_string, true, true, false,
-									 "ddl_detector worker", &err);
+	pfw_walrcv_conn = walrcv_connect(connection_string, true, true, false,
+									 "pg_follower worker", &err);
 
 	pfree(connection_string);
 
 	/* Create a replication slot */
-	create_replication_slot(ddw_walrcv_conn);
+	create_replication_slot(pfw_walrcv_conn);
 
 	/* Start streaming */
-	start_streaming(ddw_walrcv_conn);
+	start_streaming(pfw_walrcv_conn);
 
 	/* RUn main loop */
-	apply_loop(ddw_walrcv_conn);
+	apply_loop(pfw_walrcv_conn);
 
-	walrcv_disconnect(ddw_walrcv_conn);
+	walrcv_disconnect(pfw_walrcv_conn);
 }
 
 /*
  * An implentation for init_callback callback
  */
 static void
-ddl_init_shmem(void *ptr)
+pfw_init_shmem(void *ptr)
 {
-	ddl_detector_shared_state *handler = (ddl_detector_shared_state *) ptr;
+	pg_follower_shared_state *handler = (pg_follower_shared_state *) ptr;
 
 	handler->local_database_oid = InvalidOid;
 	memset(handler->connection_string, 0, MAXCONNSTRING);
@@ -483,19 +494,22 @@ ddl_init_shmem(void *ptr)
  * Attach or initialize a shared memory segment
  */
 static void
-ddl_attach_shmem(bool require_found)
+pfw_attach_shmem(bool require_found)
 {
 	bool found = false;
 
-	ddw_state = GetNamedDSMSegment("ddl_detector",
-								   sizeof(ddl_detector_shared_state),
-								   ddl_init_shmem,
+	pfw_state = GetNamedDSMSegment("pg_follower",
+								   sizeof(pg_follower_shared_state),
+								   pfw_init_shmem,
 								   &found);
 
 	if (require_found && !found)
 		elog(ERROR, "caller requires to attach the allocated memory, but not found");
 }
 
+/*
+ * Kick a new background worker
+ */
 static bool
 start_bgworker(const char *connection_string)
 {
@@ -504,15 +518,16 @@ start_bgworker(const char *connection_string)
 	BgwHandleStatus status;
 	pid_t		pid;
 
+	/* Set worker-specific data */
 	MemSet(&worker, 0, sizeof(BackgroundWorker));
-	strcpy(worker.bgw_name, "ddl_detector worker");
-	strcpy(worker.bgw_type, "ddl_detector worker");
+	strcpy(worker.bgw_name, "pg_follower worker");
+	strcpy(worker.bgw_type, "pg_follower worker");
 	worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
 					   BGWORKER_BACKEND_DATABASE_CONNECTION;
 	worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
 	worker.bgw_restart_time = BGW_NEVER_RESTART;
-	strcpy(worker.bgw_library_name, "ddl_detector");
-	strcpy(worker.bgw_function_name, "ddl_detector_worker_main");
+	strcpy(worker.bgw_library_name, "pg_follower");
+	strcpy(worker.bgw_function_name, "pg_follower_worker_main");
 
 	worker.bgw_main_arg = (Datum) 0;
 
@@ -520,11 +535,11 @@ start_bgworker(const char *connection_string)
 	worker.bgw_notify_pid = MyProcPid;
 
 	/* Dinamically allocate a shared memory */
-	ddl_attach_shmem(false);
+	pfw_attach_shmem(false);
 
 	/* Fill shared-memory data structure for passing info to the worker */ 
-	ddw_state->local_database_oid = MyDatabaseId;
-	strncpy(ddw_state->connection_string, connection_string, MAXCONNSTRING);
+	pfw_state->local_database_oid = MyDatabaseId;
+	strncpy(pfw_state->connection_string, connection_string, MAXCONNSTRING);
 
 	if (!RegisterDynamicBackgroundWorker(&worker, &handle))
 		elog(ERROR, "could not register background process");
@@ -537,7 +552,7 @@ start_bgworker(const char *connection_string)
 }
 
 Datum
-start_catchup(PG_FUNCTION_ARGS)
+start_follow(PG_FUNCTION_ARGS)
 {
 	char *connection_string;
 
