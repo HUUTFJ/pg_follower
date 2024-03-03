@@ -12,6 +12,7 @@
 #include "fmgr.h"
 
 #include "access/xlog.h"
+#include "executor/spi.h"
 #include "lib/stringinfo.h"
 #include "libpq/pqformat.h"
 #include "miscadmin.h"
@@ -25,6 +26,7 @@
 #include "tcop/tcopprot.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
+#include "utils/snapmgr.h"
 #include "utils/wait_event.h"
 
 PG_FUNCTION_INFO_V1(start_catchup);
@@ -36,7 +38,7 @@ static void ddl_attach_shmem(bool require_found);
 static void create_replication_slot(WalReceiverConn *conn);
 static bool start_streaming(WalReceiverConn *conn);
 static void apply_loop(WalReceiverConn *conn);
-static void consume_message(StringInfo message);
+static void apply_message(StringInfo message);
 static void send_feedback(WalReceiverConn *conn, XLogRecPtr recvpos, bool force,
 						  bool requestReply);
 
@@ -220,18 +222,62 @@ send_feedback(WalReceiverConn *conn, XLogRecPtr recvpos, bool force,
 		last_flushpos = flushpos;
 }
 
+/*
+ * Read received message and apply via server programming interface 
+ */
 static void
-consume_message(StringInfo message)
+apply_message(StringInfo message)
 {
-	/* NO-OP */
+	const char *query = pq_getmsgbytes(message,
+									   (message->len - message->cursor));
+
+	elog(DEBUG1, "received query: %s", query);
+
+	if (strncmp(query, "BEGIN", 5) == 0)
+	{
+		SetCurrentStatementStartTimestamp();
+		StartTransactionCommand();
+		SPI_connect();
+		PushActiveSnapshot(GetTransactionSnapshot());
+	}
+	else if (strncmp(query, "CREATE", 5) == 0)
+	{
+		int ret;
+
+		ret = SPI_execute(query, false, 1);
+
+		if (ret != SPI_OK_UTILITY)
+			elog(ERROR, "failed to execute query :%s :%d", query, ret);
+	}
+	else if (strncmp(query, "INSERT", 6) == 0)
+	{
+		int ret;
+
+		ret = SPI_execute(query, false, 1);
+
+		if (ret != SPI_OK_INSERT)
+			elog(ERROR, "failed to execute query :%s :%d", query, ret);
+	}
+	else if (strncmp(query, "COMMIT", 6) == 0)
+	{
+		SPI_finish();
+		PopActiveSnapshot();
+		CommitTransactionCommand();
+	}
 }
 
+/*
+ * main loop for the ddl worker
+ *
+ * XXX: basically ported from LogicalRepApplyLoop()
+ */
 static void
 apply_loop(WalReceiverConn *conn)
 {
 	XLogRecPtr last_received = InvalidXLogRecPtr;
 	TimeLineID	tli;
 
+	/* Init the message_context which we clean up after each message */
 	message_context = AllocSetContextCreate(ddl_worker_context,
 											"ddl_worker_context",
 											ALLOCSET_DEFAULT_SIZES);
@@ -242,6 +288,7 @@ apply_loop(WalReceiverConn *conn)
 		int			rc;
 		int			len;
 		char	   *buf = NULL;
+		bool		endofstream = false;
 
 		CHECK_FOR_INTERRUPTS();
 
@@ -264,12 +311,19 @@ apply_loop(WalReceiverConn *conn)
 				{
 					ereport(LOG,
 							(errmsg("data stream from publisher has ended")));
+					endofstream = true;
 					break;
 				}
 				else
 				{
 					int			c;
 					StringInfoData s;
+
+					if (ConfigReloadPending)
+					{
+						ConfigReloadPending = false;
+						ProcessConfigFile(PGC_SIGHUP);
+					}
 
 					/* Ensure we are reading the data into our memory context. */
 					MemoryContextSwitchTo(message_context);
@@ -296,7 +350,7 @@ apply_loop(WalReceiverConn *conn)
 						if (last_received < end_lsn)
 							last_received = end_lsn;
 
-						consume_message(&s);
+						apply_message(&s);
 					}
 					else if (c == 'k')
 					{
@@ -324,8 +378,17 @@ apply_loop(WalReceiverConn *conn)
 			}
 		}
 
-		elog(LOG, "XXX loop");
+		send_feedback(conn, last_received, false, false);
 
+		/* Cleanup the memory. */
+		MemoryContextReset(message_context);
+		MemoryContextSwitchTo(ddl_worker_context);
+
+		/* Check if we need to exit the streaming loop. */
+		if (endofstream)
+			break;
+
+		/* Sleep 1s or until new message would come */
 		rc = WaitLatchOrSocket(MyLatch,
 							   WL_SOCKET_READABLE | WL_LATCH_SET |
 							   WL_TIMEOUT | WL_EXIT_ON_PM_DEATH,
@@ -344,8 +407,7 @@ apply_loop(WalReceiverConn *conn)
 			ProcessConfigFile(PGC_SIGHUP);
 		}
 
-		MemoryContextReset(message_context);
-		MemoryContextSwitchTo(ddl_worker_context);
+		/* We won't do timeout */
 	}
 
 	walrcv_endstreaming(conn, &tli);
@@ -359,10 +421,12 @@ ddl_detector_worker_main(Datum main_arg)
 	WalReceiverConn	   *ddw_walrcv_conn = NULL;
 	char			   *err;
 
-	/* Do we have to define signal handlers? */
+	/* Setup signal handlers */
+	pqsignal(SIGHUP, SignalHandlerForConfigReload);
+	pqsignal(SIGTERM, die);
 	BackgroundWorkerUnblockSignals();
 
-	/* Load the subscription into persistent memory context. */
+	/* Determine a memory context which is mainly used */
 	ddl_worker_context = AllocSetContextCreate(TopMemoryContext,
 											   "ddl_worker_context",
 											   ALLOCSET_DEFAULT_SIZES);
@@ -389,13 +453,18 @@ ddl_detector_worker_main(Datum main_arg)
 	ddw_walrcv_conn = walrcv_connect(connection_string, true, true, false,
 									 "ddl_detector worker", &err);
 
+	pfree(connection_string);
+
 	/* Create a replication slot */
 	create_replication_slot(ddw_walrcv_conn);
 
 	/* Start streaming */
 	start_streaming(ddw_walrcv_conn);
 
+	/* RUn main loop */
 	apply_loop(ddw_walrcv_conn);
+
+	walrcv_disconnect(ddw_walrcv_conn);
 }
 
 /*
