@@ -13,6 +13,7 @@
 
 #include "access/xlog.h"
 #include "lib/stringinfo.h"
+#include "libpq/pqformat.h"
 #include "miscadmin.h"
 #include "postmaster/bgworker.h"
 #include "postmaster/interrupt.h"
@@ -23,6 +24,7 @@
 #include "storage/lwlock.h"
 #include "tcop/tcopprot.h"
 #include "utils/builtins.h"
+#include "utils/memutils.h"
 #include "utils/wait_event.h"
 
 PG_FUNCTION_INFO_V1(start_catchup);
@@ -32,15 +34,25 @@ static bool start_bgworker(const char *connection_string);
 static void ddl_init_shmem(void *ptr);
 static void ddl_attach_shmem(bool require_found);
 static void create_replication_slot(WalReceiverConn *conn);
-static void start_streaming(WalReceiverConn *conn);
+static bool start_streaming(WalReceiverConn *conn);
+static void apply_loop(WalReceiverConn *conn);
+static void consume_message(StringInfo message);
+static void send_feedback(WalReceiverConn *conn, XLogRecPtr recvpos, bool force,
+						  bool requestReply);
 
 static uint32 ddl_detector_we_main = 0;
+
+static MemoryContext message_context = NULL;
+static MemoryContext ddl_worker_context = NULL;
 
 /* Determine the max length for the connection string */
 #define MAXCONNSTRING 1024
 
 /* Determine name of used replication slot */
 #define DDW_SLOT_NAME "ddl_detector_tmp_slot"
+
+/* Determine name of used plugin */
+#define DDW_PLUGIN_NAME "ddl_detector"
 
 /* Shared state information for ddl_detector bgworker. */
 typedef struct
@@ -68,8 +80,8 @@ create_replication_slot(WalReceiverConn *conn)
 	bool			started_tx = false;
 
 	initStringInfo(&query);
-	appendStringInfoString(&query, "CREATE_REPLICATION_SLOT " DDW_SLOT_NAME
-								   " TEMPORARY LOGICAL ddl_detector;");
+	appendStringInfo(&query, "CREATE_REPLICATION_SLOT %s TEMPORARY LOGICAL %s",
+					 DDW_SLOT_NAME, DDW_PLUGIN_NAME);
 
 	/* The syscache access in walrcv_exec() needs a transaction env. */
 	if (!IsTransactionState())
@@ -92,7 +104,7 @@ create_replication_slot(WalReceiverConn *conn)
  * walrcv_startstreaming() macro cannot be used becasue it requires to specify
  * the name of publications.
  */
-static void
+static bool
 start_streaming(WalReceiverConn *conn)
 {
 	StringInfoData 	query;
@@ -107,8 +119,8 @@ start_streaming(WalReceiverConn *conn)
 		started_tx = true;
 	}
 
-	appendStringInfoString(&query, "START_REPLICATION SLOT " DDW_SLOT_NAME
-								   " LOGICAL 0/0 ;");
+	appendStringInfo(&query, "START_REPLICATION SLOT %s LOGICAL 0/0 ;",
+					 DDW_SLOT_NAME);
 
 	/*
 	 * Since START_REPLICATION returns PGRES_COPY_BOTH response, no need to
@@ -120,6 +132,223 @@ start_streaming(WalReceiverConn *conn)
 		CommitTransactionCommand();
 
 	pfree(query.data);
+
+	return true;
+}
+
+/*
+ * Send a Standby Status Update message to server.
+ *
+ * 'recvpos' is the latest LSN we've received data to, force is set if we need
+ * to send a response to avoid timeouts.
+ */
+static void
+send_feedback(WalReceiverConn *conn, XLogRecPtr recvpos, bool force,
+			  bool requestReply)
+{
+	static StringInfo reply_message = NULL;
+	static TimestampTz send_time = 0;
+
+	static XLogRecPtr last_recvpos = InvalidXLogRecPtr;
+	static XLogRecPtr last_writepos = InvalidXLogRecPtr;
+	static XLogRecPtr last_flushpos = InvalidXLogRecPtr;
+
+	/* XXX: Reply as all the WAL records has been flushed */
+	XLogRecPtr	writepos = recvpos;
+	XLogRecPtr	flushpos = recvpos;
+	TimestampTz now;
+
+	/*
+	 * If the user doesn't want status to be reported to the publisher, be
+	 * sure to exit before doing anything at all.
+	 */
+	if (!force && wal_receiver_status_interval <= 0)
+		return;
+
+	/* It's legal to not pass a recvpos */
+	if (recvpos < last_recvpos)
+		recvpos = last_recvpos;
+
+	if (writepos < last_writepos)
+		writepos = last_writepos;
+
+	if (flushpos < last_flushpos)
+		flushpos = last_flushpos;
+
+	now = GetCurrentTimestamp();
+
+	/* if we've already reported everything we're good */
+	if (!force &&
+		writepos == last_writepos &&
+		flushpos == last_flushpos &&
+		!TimestampDifferenceExceeds(send_time, now,
+									wal_receiver_status_interval * 1000))
+		return;
+	send_time = now;
+
+	if (!reply_message)
+	{
+		MemoryContext oldctx = MemoryContextSwitchTo(ddl_worker_context);
+
+		reply_message = makeStringInfo();
+		MemoryContextSwitchTo(oldctx);
+	}
+	else
+		resetStringInfo(reply_message);
+
+	pq_sendbyte(reply_message, 'r');
+	pq_sendint64(reply_message, recvpos);	/* write */
+	pq_sendint64(reply_message, flushpos);	/* flush */
+	pq_sendint64(reply_message, writepos);	/* apply */
+	pq_sendint64(reply_message, now);	/* sendTime */
+	pq_sendbyte(reply_message, requestReply);	/* replyRequested */
+
+	elog(DEBUG2, "sending feedback (force %d) to recv %X/%X, write %X/%X, flush %X/%X",
+		 force,
+		 LSN_FORMAT_ARGS(recvpos),
+		 LSN_FORMAT_ARGS(writepos),
+		 LSN_FORMAT_ARGS(flushpos));
+
+	walrcv_send(conn,
+				reply_message->data, reply_message->len);
+
+	if (recvpos > last_recvpos)
+		last_recvpos = recvpos;
+	if (writepos > last_writepos)
+		last_writepos = writepos;
+	if (flushpos > last_flushpos)
+		last_flushpos = flushpos;
+}
+
+static void
+consume_message(StringInfo message)
+{
+	/* NO-OP */
+}
+
+static void
+apply_loop(WalReceiverConn *conn)
+{
+	XLogRecPtr last_received = InvalidXLogRecPtr;
+	TimeLineID	tli;
+
+	message_context = AllocSetContextCreate(ddl_worker_context,
+											"ddl_worker_context",
+											ALLOCSET_DEFAULT_SIZES);
+
+	for (;;)
+	{
+		pgsocket	fd = PGINVALID_SOCKET;
+		int			rc;
+		int			len;
+		char	   *buf = NULL;
+
+		CHECK_FOR_INTERRUPTS();
+
+		MemoryContextSwitchTo(message_context);
+
+		len = walrcv_receive(conn, &buf, &fd);
+
+		if (len != 0)
+		{
+			/* Loop to process all available data (without blocking). */
+			for (;;)
+			{
+				CHECK_FOR_INTERRUPTS();
+
+				if (len == 0)
+				{
+					break;
+				}
+				else if (len < 0)
+				{
+					ereport(LOG,
+							(errmsg("data stream from publisher has ended")));
+					break;
+				}
+				else
+				{
+					int			c;
+					StringInfoData s;
+
+					/* Ensure we are reading the data into our memory context. */
+					MemoryContextSwitchTo(message_context);
+
+					initReadOnlyStringInfo(&s, buf, len);
+
+					c = pq_getmsgbyte(&s);
+
+					if (c == 'w')
+					{
+						XLogRecPtr	start_lsn;
+						XLogRecPtr	end_lsn;
+
+						elog(LOG, "XXX got w");
+
+						start_lsn = pq_getmsgint64(&s);
+						end_lsn = pq_getmsgint64(&s);
+						/* Timestamp is not used now */
+						(void) pq_getmsgint64(&s);
+
+						if (last_received < start_lsn)
+							last_received = start_lsn;
+
+						if (last_received < end_lsn)
+							last_received = end_lsn;
+
+						consume_message(&s);
+					}
+					else if (c == 'k')
+					{
+						XLogRecPtr	end_lsn;
+						bool		reply_requested;
+
+						elog(LOG, "XXX got k");
+
+						end_lsn = pq_getmsgint64(&s);
+						/* Timestamp is not used now */
+						(void) pq_getmsgint64(&s);
+						reply_requested = pq_getmsgbyte(&s);
+
+						if (last_received < end_lsn)
+							last_received = end_lsn;
+
+						send_feedback(conn, last_received, reply_requested, false);
+					}
+					/* other message types are purposefully ignored */
+
+					MemoryContextReset(message_context);
+				}
+
+				len = walrcv_receive(conn, &buf, &fd);
+			}
+		}
+
+		elog(LOG, "XXX loop");
+
+		rc = WaitLatchOrSocket(MyLatch,
+							   WL_SOCKET_READABLE | WL_LATCH_SET |
+							   WL_TIMEOUT | WL_EXIT_ON_PM_DEATH,
+							   fd, 1000L,
+							   ddl_detector_we_main);
+
+		if (rc & WL_LATCH_SET)
+		{
+			ResetLatch(MyLatch);
+			CHECK_FOR_INTERRUPTS();
+		}
+
+		if (ConfigReloadPending)
+		{
+			ConfigReloadPending = false;
+			ProcessConfigFile(PGC_SIGHUP);
+		}
+
+		MemoryContextReset(message_context);
+		MemoryContextSwitchTo(ddl_worker_context);
+	}
+
+	walrcv_endstreaming(conn, &tli);
 }
 
 void
@@ -132,6 +361,12 @@ ddl_detector_worker_main(Datum main_arg)
 
 	/* Do we have to define signal handlers? */
 	BackgroundWorkerUnblockSignals();
+
+	/* Load the subscription into persistent memory context. */
+	ddl_worker_context = AllocSetContextCreate(TopMemoryContext,
+											   "ddl_worker_context",
+											   ALLOCSET_DEFAULT_SIZES);
+	MemoryContextSwitchTo(ddl_worker_context);
 
 	/* Attach the shared memory */
 	ddl_attach_shmem(true);
@@ -154,26 +389,13 @@ ddl_detector_worker_main(Datum main_arg)
 	ddw_walrcv_conn = walrcv_connect(connection_string, true, true, false,
 									 "ddl_detector worker", &err);
 
-	if (ddw_walrcv_conn == NULL)
-		elog(ERROR, "could not connect to the upstream: %s", err);
-
 	/* Create a replication slot */
 	create_replication_slot(ddw_walrcv_conn);
 
 	/* Start streaming */
 	start_streaming(ddw_walrcv_conn);
 
-	for (;;)
-	{
-		elog(LOG, "XXX loop");
-
-		ResetLatch(MyLatch);
-
-		(void) WaitLatch(MyLatch,
-						 WL_LATCH_SET | WL_EXIT_ON_PM_DEATH,
-						 1000L,
-						 ddl_detector_we_main);
-	}
+	apply_loop(ddw_walrcv_conn);
 }
 
 /*

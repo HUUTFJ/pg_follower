@@ -11,16 +11,21 @@ use Test::More;
 # Setup upstream node
 my $upstream = PostgreSQL::Test::Cluster->new('upstream');
 $upstream->init(allows_streaming => 'logical');
+$upstream->append_conf('postgresql.conf', "log_min_messages = debug1");
+$upstream->append_conf('postgresql.conf', "wal_sender_timeout = 0");
 $upstream->start;
 
 # Install the ddl_detector extension
 $upstream->safe_psql('postgres', "CREATE EXTENSION ddl_detector;");
+$upstream->safe_psql('postgres', "CREATE TABLE foo (id int);");
 
 # Setup downstream as well
 my $downstream = PostgreSQL::Test::Cluster->new('downstream');
 $downstream->init();
+# $downstream->append_conf('postgresql.conf', "log_min_messages = debug1");
 $downstream->start;
 $downstream->safe_psql('postgres', "CREATE EXTENSION ddl_detector;");
+$downstream->safe_psql('postgres', "CREATE TABLE foo (id int);");
 
 # Call start_catchup() for starting a worker
 my $upstream_connstr = $upstream->connstr . ' dbname=postgres';
@@ -53,6 +58,8 @@ $result = $upstream->safe_psql(
 ");
 is($result, "ddl_detector_tmp_slot|ddl_detector|logical|postgres|t",
    "check the replication stop has appropriate profiles");
+
+$upstream->safe_psql('postgres', "INSERT INTO foo VALUES (1);");
 
 # Shutdown both nodes.
 # XXX: The downstream must be stopped first because the worker won't consume

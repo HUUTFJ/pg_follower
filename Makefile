@@ -5,6 +5,8 @@ OBJS = \
 	ddl_detector.o \
 	ddl_detector_apply.o \
 	ddl_detector_output.o
+PG_CPPFLAGS = -I$(libpq_srcdir)
+SHLIB_LINK_INTERNAL = $(libpq)
 
 EXTENSION = ddl_detector
 DATA = ddl_detector--1.0.sql

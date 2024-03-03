@@ -157,7 +157,7 @@ test_function(PG_FUNCTION_ARGS)
 
 	query = deparse_createstmt((CreateStmt *)trigdata->parsetree);
 
-	elog(INFO, "deparse result: %s", query);
+	elog(DEBUG1, "deparse result: %s", query);
 
 	/* Emit the result to the log. */
 	LogLogicalMessage("ddl_detector", query, strlen(query), true, false);

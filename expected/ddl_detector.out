@@ -6,7 +6,6 @@ SELECT slot_name FROM pg_create_logical_replication_slot('test', 'test_decoding'
 (1 row)
 
 CREATE TABLE IF NOT EXISTS foo (id int, data text, value real);
-INFO:  deparse result: CREATE TABLE IF NOT EXISTS public.foo ( id pg_catalog.int4, data text, value pg_catalog.float4 );
 SELECT data FROM pg_logical_slot_get_changes('test', NULL, NULL, 'include-xids', '0');
                                                                                data                                                                               
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------
