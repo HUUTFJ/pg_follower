@@ -11,7 +11,6 @@ jobs:
       - name: Setup node
         run: sudo apt-get -y install build-essential
       - name: Get Source code
-        uses: actions/checkout@4
+        uses: actions/checkout@v4
         with:
           repository: HUUTFJ/postgres
-          path: postgres
