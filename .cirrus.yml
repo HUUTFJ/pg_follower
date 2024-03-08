@@ -1,4 +1,0 @@
-test_task:
-  container:
-    image: postgres:latest
-  test_script: make check
