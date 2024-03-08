@@ -6,11 +6,16 @@ jobs:
   pull-postgres:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
       - name: Setup node
         run: sudo apt-get -y install build-essential
-      - name: Get Source code
+      - name: Get PostgreSQL Sources
         uses: actions/checkout@v4
         with:
           repository: HUUTFJ/postgres
+      - name: Configure PostgreSQL
+        run:
+          cd ${{ github.workspace }}/HUUTFJ/postgres
+          ./configure --enable-cassert --enable-debug
+      - name: Build PostgreSQL
+        run:
+          make -j2
