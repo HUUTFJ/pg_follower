@@ -15,6 +15,6 @@ jobs:
       - name: Change directory
         run: cd ${{ github.workspace }}/HUUTFJ/postgres
       - name: Configure PostgreSQL
-        name: ./configure --enable-cassert --enable-debug
+        run: ./configure --enable-cassert --enable-debug
       - name: Build PostgreSQL
         run: make -j2
