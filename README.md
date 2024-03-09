@@ -83,7 +83,7 @@ downstream=# SELECT * FROM foo ;
 
 ## Supported feature
 
-For now, only `INSERT` and `CREATE TABLE` statements can be replicated.
+For now, only `INSERT`, `CREATE TABLE` and `DROP TABLE` statements can be replicated.
 Any constraints and parameters for the `CREATE TABLE` would be ignored.
 Also, an ERROR would be raised if below clauses are used:
 
@@ -119,6 +119,5 @@ The result would be written to WAL record as logical decoding messages.
 ## TODO
 
 * Add support for table/column constraints
-* Add support for `DROP TABLE` statement
 * Add support for `UPDATE` statement
 * Add support for `DELETE` statement
