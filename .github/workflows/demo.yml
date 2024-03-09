@@ -12,8 +12,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: HUUTFJ/postgres
-      - name: Change directory
-        run: cd ${{ github.workspace }}/HUUTFJ/postgres
+#      - name: Change directory
+#        run: cd ${{ github.workspace }}/HUUTFJ/postgres
       - name: Configure PostgreSQL
         run: ./configure --enable-cassert --enable-debug
       - name: Build PostgreSQL
