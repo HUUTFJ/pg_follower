@@ -24,6 +24,10 @@ jobs:
           repository: HUUTFJ/pg_follower
           path: postgres/contrib/pg_follower
       - name: Build pg_follower
-        run: make -j4
-      - name: Run test
-        run: make check
+        run: |
+          cd postgres/contrib/pg_follower
+          make -j4
+      - name: Ttest pg_follower
+        run: |
+          cd postgres/contrib/pg_follower
+          make check
