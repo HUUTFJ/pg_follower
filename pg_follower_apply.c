@@ -248,7 +248,8 @@ apply_message(StringInfo message)
 		SPI_connect();
 		PushActiveSnapshot(GetTransactionSnapshot());
 	}
-	else if (strncmp(query, "CREATE", 5) == 0)
+	else if (strncmp(query, "CREATE", 5) == 0 ||
+			 strncmp(query, "DROP", 4) == 0)
 	{
 		int ret;
 
@@ -463,6 +464,9 @@ pg_follower_worker_main(Datum main_arg)
 	/* Connect to the upstream */
 	pfw_walrcv_conn = walrcv_connect(connection_string, true, true, false,
 									 "pg_follower worker", &err);
+
+	if (pfw_walrcv_conn == NULL)
+		elog(ERROR, "bad connection");
 
 	pfree(connection_string);
 
