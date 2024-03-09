@@ -4,7 +4,7 @@ The `pg_follower` extension provides a logical replication feature for PostgreSQ
 
 Note that this extension was created for educational purposes. Please do not use it in the production stage.
 
-![Workflow result](https://github.com/HUUTFJ/pg_follower/actions/workflows/test.yml/badge.svg)
+[![Workflow result](https://github.com/HUUTFJ/pg_follower/actions/workflows/test.yml/badge.svg)](https://github.com/HUUTFJ/pg_follower/actions/workflows/test.yml)
 
 ## Prerequisite
 
