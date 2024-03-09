@@ -7,14 +7,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Setup node
-        run: sudo apt-get -y install build-essential
+        run: sudo apt-get -y install build-essential libreadline-dev zlib1g-dev flex bison libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache pkg-config libipc-run-perl
       - name: Get PostgreSQL Sources
         uses: actions/checkout@v4
         with:
           repository: HUUTFJ/postgres
-#      - name: Change directory
-#        run: cd ${{ github.workspace }}/HUUTFJ/postgres
-      - name: Configure PostgreSQL
-        run: ./configure --enable-cassert --enable-debug
-      - name: Build PostgreSQL
-        run: make -j2
+#      - name: Configure PostgreSQL
+#        run: ./configure --enable-cassert --enable-debug --enable-tap-tests
+#      - name: Build PostgreSQL
+#        run: make -j4
+# TODO: cache the build output
+# XXX: Should we change the job here?
+      - name: Get pg_follower Sources
+        uses: actions/checkout@v4
+        with:
+          repository: HUUTFJ/pg_follower
+          path: postgres/contrib/pg_follower
