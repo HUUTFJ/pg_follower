@@ -1,9 +1,8 @@
-name: learn-github-actions
-run-name: ${{ github.actor }} is learning GitHub Actions
+name: Test
 on: [push]
 
 jobs:
-  pull-postgres:
+  build-and-test:
     runs-on: ubuntu-latest
     steps:
       - name: Setup node
