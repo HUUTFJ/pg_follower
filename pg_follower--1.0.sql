@@ -19,5 +19,5 @@ LANGUAGE C;
 -- Event trigger
 CREATE EVENT TRIGGER test_trigger
 ON ddl_command_end
-WHEN TAG in ('CREATE TABLE')
+WHEN TAG in ('CREATE TABLE', 'DROP TABLE')
 EXECUTE FUNCTION detect_ddl();

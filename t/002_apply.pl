@@ -63,6 +63,11 @@ $upstream->safe_psql('postgres', "INSERT INTO foo VALUES (generate_series(1, 10)
 $result = $downstream->safe_psql('postgres', "SELECT count(1) FROM foo");
 is($result, "10", "check the DDL was propagated");
 
+# DROP TABLE can be also replicated
+$upstream->safe_psql('postgres', "DROP TABLE foo;");
+$result = $downstream->safe_psql('postgres', "SELECT count(1) FROM pg_class WHERE relname = 'foo'");
+is($result, "0", "table was dropped");
+
 # Shutdown both nodes.
 # XXX: The downstream must be stopped first because the worker won't consume
 # any changes yet.

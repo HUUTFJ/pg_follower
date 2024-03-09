@@ -26,14 +26,82 @@ PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(detect_ddl);
 
-static bool verify_statement(CreateStmt *stmt);
-static char *deparse_createstmt(CreateStmt *stmt);
+static void handle_createstmt(CreateStmt *stmt);
+static void handle_dropstmt(DropStmt *stmt);
+
+static char *
+deparse_dropstmt(DropStmt *stmt)
+{
+	StringInfoData	deparsed;
+	ListCell	   *lc;
+	bool			first_try = true;
+
+	Assert(stmt->removeType == OBJECT_TABLE);
+
+	initStringInfo(&deparsed);
+	appendStringInfo(&deparsed, "DROP TABLE %s ",
+					 stmt->missing_ok ? "IF EXISTS" : "");
+
+	foreach(lc, stmt->objects)
+	{
+		RangeVar *rel = makeRangeVarFromNameList((List *) lfirst(lc));
+
+		/* Only parmanent tables are supported */
+		if (rel->relpersistence != RELPERSISTENCE_PERMANENT)
+		{
+			elog(INFO, "detected");
+			continue;
+		}
+
+
+		if (!first_try)
+			appendStringInfoString(&deparsed, ", ");
+
+		if (rel->schemaname)
+			appendStringInfo(&deparsed, "%s.%s", rel->schemaname, rel->relname);
+		else
+			appendStringInfoString(&deparsed, rel->relname);
+
+		first_try = false;
+	}
+
+	switch (stmt->behavior)
+	{
+		case DROP_RESTRICT:
+			appendStringInfoString(&deparsed, " RESTRICT");
+			break;
+		case DROP_CASCADE:
+			appendStringInfoString(&deparsed, " CASCADE");
+			break;
+		default:
+			break;
+	}
+
+	appendStringInfoChar(&deparsed, ';');
+
+	return deparsed.data;
+}
+
+static void
+handle_dropstmt(DropStmt *stmt)
+{
+	char *query;
+
+	query = deparse_dropstmt(stmt);
+
+	elog(DEBUG1, "deparse result: %s", query);
+
+	/* Emit the result to the log. */
+	LogLogicalMessage("pg_follower", query, strlen(query), true, false);
+
+	pfree(query);
+}
 
 /*
  * Check whether the relation can be exported.
  */
 static bool
-verify_statement(CreateStmt *stmt)
+verify_createstatement(CreateStmt *stmt)
 {
 	ListCell *lc;
 
@@ -126,36 +194,16 @@ deparse_createstmt(CreateStmt *stmt)
 	return deparsed.data;
 }
 
-/*
- * Trigger function
- */
-Datum
-detect_ddl(PG_FUNCTION_ARGS)
+static void
+handle_createstmt(CreateStmt *stmt)
 {
-	EventTriggerData *trigdata;
-	char			 *query;
-
-	if (!CALLED_AS_EVENT_TRIGGER(fcinfo))
-		elog(ERROR, "must be called as event trigger");
-
-	trigdata = (EventTriggerData *) fcinfo->context;
-
-	/* Only CREATE TABLE command is supported, for now */
-	if (trigdata->tag != CMDTAG_CREATE_TABLE)
-	{
-		elog(WARNING, "this DDL is not supported: %s",
-			 GetCommandTagName(trigdata->tag));
-
-		PG_RETURN_NULL();
-	}
-
-	Assert(IsA(trigdata->parsetree, CreateStmt));
+	char *query;
 
 	/* Can we deparse the statement? If not, do nothing */
-	if (!verify_statement((CreateStmt *)trigdata->parsetree))
-		PG_RETURN_NULL();
+	if (!verify_createstatement(stmt))
+		return;
 
-	query = deparse_createstmt((CreateStmt *)trigdata->parsetree);
+	query = deparse_createstmt(stmt);
 
 	elog(DEBUG1, "deparse result: %s", query);
 
@@ -163,6 +211,37 @@ detect_ddl(PG_FUNCTION_ARGS)
 	LogLogicalMessage("pg_follower", query, strlen(query), true, false);
 
 	pfree(query);
+}
+
+/*
+ * Trigger function
+ */
+Datum
+detect_ddl(PG_FUNCTION_ARGS)
+{
+	EventTriggerData   *trigdata;
+	CommandTag			tag;
+
+	if (!CALLED_AS_EVENT_TRIGGER(fcinfo))
+		elog(ERROR, "must be called as event trigger");
+
+	trigdata = (EventTriggerData *) fcinfo->context;
+
+	tag = trigdata->tag;
+
+	switch (tag)
+	{
+		case CMDTAG_CREATE_TABLE:
+			handle_createstmt((CreateStmt *) trigdata->parsetree);
+			break;
+		case CMDTAG_DROP_TABLE:
+			handle_dropstmt((DropStmt *) trigdata->parsetree);
+			break;
+		default:
+			elog(WARNING, "this DDL is not supported: %s",
+				GetCommandTagName(trigdata->tag));
+			break;
+	}
 
 	PG_RETURN_NULL();
 }
