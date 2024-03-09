@@ -14,20 +14,20 @@ jobs:
           repository: HUUTFJ/postgres
       - name: Configure PostgreSQL
         run: ./configure --enable-cassert --enable-debug --enable-tap-tests
-      - name: Build PostgreSQL
-        run: make -j4
+#      - name: Build PostgreSQL
+#        run: make -j4
 # TODO: cache the build output
 # XXX: Should we change the job here?
       - name: Get pg_follower Sources
         uses: actions/checkout@v4
         with:
           repository: HUUTFJ/pg_follower
-          path: postgres/contrib/pg_follower
+          path: contrib/pg_follower
       - name: Build pg_follower
         run: |
-          cd postgres/contrib/pg_follower
+          cd contrib/pg_follower
           make -j4
       - name: Ttest pg_follower
         run: |
-          cd postgres/contrib/pg_follower
+          cd contrib/pg_follower
           make check
