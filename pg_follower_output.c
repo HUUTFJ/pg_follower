@@ -15,6 +15,7 @@
 #include "replication/logical.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
+#include "utils/memutils.h"
 
 /* Support routines */
 static void output_insert(StringInfo out, Relation relation, char *schema_name,
@@ -43,6 +44,11 @@ static void follower_message(LogicalDecodingContext *ctx,
 							 const char *prefix,
 							 Size message_size,
 							 const char *message);
+
+typedef struct
+{
+	MemoryContext context;
+} PgFollowerData;
 
 /*
  * Print literal `outputstr' already represented as string of type `typid'
@@ -237,6 +243,15 @@ static void
 follower_startup(LogicalDecodingContext *ctx, OutputPluginOptions *options,
 				 bool is_init)
 {
+	PgFollowerData *data = palloc(sizeof(PgFollowerData));
+
+	/* Create our memory context for private allocations. */
+	data->context = AllocSetContextCreate(ctx->context,
+										  "pg_follower output context",
+										  ALLOCSET_DEFAULT_SIZES);
+	ctx->output_plugin_private = data;
+
+	/* Only textual format is supported. */
 	options->output_type = OUTPUT_PLUGIN_TEXTUAL_OUTPUT;
 }
 
@@ -262,7 +277,14 @@ static void
 follower_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 				Relation relation, ReorderBufferChange *change)
 {
-	char *schema_name = get_namespace_name(RelationGetNamespace(relation));
+	char		   *schema_name;
+	PgFollowerData *data = (PgFollowerData *) ctx->output_plugin_private;
+	MemoryContext	old;
+
+	/* Avoid leaking memory by using and resetting our own context */
+	old = MemoryContextSwitchTo(data->context);
+
+	schema_name = get_namespace_name(RelationGetNamespace(relation));
 
 	/* Swtich based on the actual action */
 	switch (change->action)
@@ -288,6 +310,8 @@ follower_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 	}
 
 	pfree(schema_name);
+	MemoryContextSwitchTo(old);
+	MemoryContextReset(data->context);
 }
 
 /*
