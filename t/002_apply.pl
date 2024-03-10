@@ -19,7 +19,6 @@ $upstream->safe_psql('postgres', "CREATE EXTENSION pg_follower;");
 # Setup downstream as well
 my $downstream = PostgreSQL::Test::Cluster->new('downstream');
 $downstream->init();
-# $downstream->append_conf('postgresql.conf', "log_min_messages = debug1");
 $downstream->start;
 $downstream->safe_psql('postgres', "CREATE EXTENSION pg_follower;");
 
@@ -58,6 +57,7 @@ is($result, "pg_follower_tmp_slot|pg_follower|logical|postgres|t",
 # Create a table and insert tuples to it
 $upstream->safe_psql('postgres', "CREATE TABLE foo (id int);");
 $upstream->safe_psql('postgres', "INSERT INTO foo VALUES (generate_series(1, 10));");
+$upstream->wait_for_catchup('pg_follower worker');
 
 # Confirm messages were applied on the downstream
 $result = $downstream->safe_psql('postgres', "SELECT count(1) FROM foo");
@@ -65,13 +65,13 @@ is($result, "10", "check the DDL was propagated");
 
 # DROP TABLE can be also replicated
 $upstream->safe_psql('postgres', "DROP TABLE foo;");
+$upstream->wait_for_catchup('pg_follower worker');
+
 $result = $downstream->safe_psql('postgres', "SELECT count(1) FROM pg_class WHERE relname = 'foo'");
 is($result, "0", "table was dropped");
 
 # Shutdown both nodes.
-# XXX: The downstream must be stopped first because the worker won't consume
-# any changes yet.
-$downstream->stop;
 $upstream->stop;
+$downstream->stop;
 
 done_testing();
