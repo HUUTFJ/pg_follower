@@ -256,22 +256,23 @@ apply_message(StringInfo message)
 		ret = SPI_execute(query, false, 1);
 
 		if (ret != SPI_OK_UTILITY)
-			elog(ERROR, "failed to execute query :%s :%d", query, ret);
-	}
-	else if (strncmp(query, "INSERT", 6) == 0)
-	{
-		int ret;
-
-		ret = SPI_execute(query, false, 1);
-
-		if (ret != SPI_OK_INSERT)
-			elog(ERROR, "failed to execute query :%s :%d", query, ret);
+			elog(ERROR, "failed to execute query content: \"%s\" length:%d", query, ret);
 	}
 	else if (strncmp(query, "COMMIT", 6) == 0)
 	{
 		SPI_finish();
 		PopActiveSnapshot();
 		CommitTransactionCommand();
+	}
+	/* Seems normal DML commands or TRUNCATE. Use the given string as-is. */
+	else
+	{
+		int ret;
+
+		ret = SPI_execute(query, false, 1);
+
+		if (ret < 0)
+			elog(ERROR, "failed to execute query :%s :%d", query, ret);
 	}
 }
 
@@ -346,8 +347,6 @@ apply_loop(WalReceiverConn *conn)
 						XLogRecPtr	start_lsn;
 						XLogRecPtr	end_lsn;
 
-						elog(LOG, "XXX got w");
-
 						start_lsn = pq_getmsgint64(&s);
 						end_lsn = pq_getmsgint64(&s);
 						/* Timestamp is not used now */
@@ -365,8 +364,6 @@ apply_loop(WalReceiverConn *conn)
 					{
 						XLogRecPtr	end_lsn;
 						bool		reply_requested;
-
-						elog(LOG, "XXX got k");
 
 						end_lsn = pq_getmsgint64(&s);
 						/* Timestamp is not used now */
