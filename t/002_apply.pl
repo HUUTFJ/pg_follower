@@ -63,6 +63,13 @@ $upstream->wait_for_catchup('pg_follower worker');
 $result = $downstream->safe_psql('postgres', "SELECT count(1) FROM foo");
 is($result, "10", "check the DDL was propagated");
 
+# TRUNCATE can be replicated
+$upstream->safe_psql('postgres', "TRUNCATE foo;");
+$upstream->wait_for_catchup('pg_follower worker');
+
+$result = $downstream->safe_psql('postgres', "SELECT count(1) FROM foo");
+is($result, "0", "check the TRUNCATE was propagated");
+
 # DROP TABLE can be also replicated
 $upstream->safe_psql('postgres', "DROP TABLE foo;");
 $upstream->wait_for_catchup('pg_follower worker');

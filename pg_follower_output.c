@@ -44,6 +44,11 @@ static void follower_message(LogicalDecodingContext *ctx,
 							 const char *prefix,
 							 Size message_size,
 							 const char *message);
+static void follower_truncate(struct LogicalDecodingContext *ctx,
+							  ReorderBufferTXN *txn,
+							  int nrelations,
+							  Relation relations[],
+							  ReorderBufferChange *change);
 
 typedef struct
 {
@@ -330,7 +335,7 @@ follower_commit(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 }
 
 /*
- * COMMIT callback which is called whenever a logical decoding message has been
+ * message callback which is called whenever a logical decoding message has been
  * decoded.
  *
  * In terms of pg_follower, DDL commands would be recorded as logical message.
@@ -353,6 +358,41 @@ follower_message(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 	OutputPluginWrite(ctx, true);
 }
 
+/*
+ * TRUNCATE callback which is called whenever a truncate command is executed.
+ */
+static void
+follower_truncate(struct LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
+				  int nrelations, Relation relations[],
+				  ReorderBufferChange *change)
+{
+	OutputPluginPrepareWrite(ctx, true);
+
+	appendStringInfoString(ctx->out, "TRUNCATE ");
+
+	for (int i = 0; i < nrelations; i++)
+	{
+		Form_pg_class entry = relations[i]->rd_rel;
+
+		if (i > 0)
+			appendStringInfoString(ctx->out, ", ");
+
+		appendStringInfoString(ctx->out, NameStr(entry->relname));
+
+		/* Check whether RESTART IDENTITY and CASCADE options are specified */
+		if (change->data.truncate.restart_seqs)
+			appendStringInfoString(ctx->out, " RESET IDENTITY");
+
+		if (change->data.truncate.cascade)
+			appendStringInfoString(ctx->out, " CASCADE");
+	}
+
+	appendStringInfoString(ctx->out, ";");
+
+	OutputPluginWrite(ctx, true);
+}
+
+
 /* Specify output plugin callbacks */
 void
 _PG_output_plugin_init(OutputPluginCallbacks *cb)
@@ -364,4 +404,5 @@ _PG_output_plugin_init(OutputPluginCallbacks *cb)
 	cb->change_cb = follower_change;
 	cb->commit_cb = follower_commit;
 	cb->message_cb = follower_message;
+	cb->truncate_cb = follower_truncate;
 }

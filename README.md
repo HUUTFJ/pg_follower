@@ -83,7 +83,7 @@ downstream=# SELECT * FROM foo ;
 
 ## Supported feature
 
-For now, only `INSERT`, `CREATE TABLE` and `DROP TABLE` statements can be replicated.
+For now, only `INSERT`, `CREATE TABLE`, `DROP TABLE`, and `TRUNCATE` statements can be replicated.
 Any constraints and parameters for the `CREATE TABLE` would be ignored.
 Also, an ERROR would be raised if below clauses are used:
 

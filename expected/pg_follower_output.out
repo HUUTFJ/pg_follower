@@ -9,19 +9,23 @@ CREATE TABLE foo (id int, data text);
 INSERT INTO foo VALUES (1, 'test data');
 UPDATE foo SET id = 2 WHERE id = 1;
 DELETE FROM foo;
+CREATE TABLE var (id int);
+TRUNCATE foo, var RESTART IDENTITY CASCADE;
 DROP TABLE foo;
 COMMIT;
 SELECT data FROM pg_logical_slot_get_changes('test', NULL, NULL, 'include-xids', '0');
-                              data                              
-----------------------------------------------------------------
+                               data                               
+------------------------------------------------------------------
  BEGIN;
  CREATE TABLE  public.foo ( id pg_catalog.int4, data text );
  INSERT INTO public.foo ( id, data ) VALUES ( 1, 'test data' );
  UPDATE public.foo SET 
  DELETE FROM public.foo 
+ CREATE TABLE  public.var ( id pg_catalog.int4 );
+ TRUNCATE foo RESET IDENTITY CASCADE, var RESET IDENTITY CASCADE;
  DROP TABLE  foo RESTRICT;
  COMMIT;
-(7 rows)
+(9 rows)
 
 SELECT * FROM pg_drop_replication_slot('test');
  pg_drop_replication_slot 
