@@ -2,7 +2,7 @@
  *
  * pg_follower_output.c
  *		logical decoding output plugin
- * 
+ *
  * IDENTIFICATION
  *		pg_follower/pg_follower_output.c
  *
@@ -53,7 +53,7 @@ static void follower_truncate(struct LogicalDecodingContext *ctx,
 typedef struct
 {
 	MemoryContext context;
-} PgFollowerData;
+}			PgFollowerData;
 
 /*
  * Print literal `outputstr' already represented as string of type `typid'
@@ -119,10 +119,10 @@ static void
 output_insert(StringInfo out, Relation relation, char *schema_name,
 			  ReorderBufferChange *change)
 {
-	HeapTuple		new_tuple;
-	TupleDesc		descriptor;
-	bool			first_try = true;
-	StringInfoData	values;
+	HeapTuple	new_tuple;
+	TupleDesc	descriptor;
+	bool		first_try = true;
+	StringInfoData values;
 
 	Assert(change->action == REORDER_BUFFER_CHANGE_INSERT);
 
@@ -142,11 +142,11 @@ output_insert(StringInfo out, Relation relation, char *schema_name,
 	 */
 	for (int atts = 0; atts < descriptor->natts; atts++)
 	{
-		Form_pg_attribute	att = TupleDescAttr(descriptor, atts);
-		bool				isnull;
-		Datum				datum;
-		Oid					typoutput;
-		bool				typisvarlena;
+		Form_pg_attribute att = TupleDescAttr(descriptor, atts);
+		bool		isnull;
+		Datum		datum;
+		Oid			typoutput;
+		bool		typisvarlena;
 
 		/* Skip if the attribute is invalid */
 		if (att->attisdropped || att->attgenerated)
@@ -167,8 +167,9 @@ output_insert(StringInfo out, Relation relation, char *schema_name,
 		}
 
 		/*
-		 * OK, let's start to write the each attributes. Since someone might be
-		 * skipped, all to-be-written attributes must be explicitly described.
+		 * OK, let's start to write the each attributes. Since someone might
+		 * be skipped, all to-be-written attributes must be explicitly
+		 * described.
 		 */
 		appendStringInfo(out, "%s", quote_identifier(NameStr(att->attname)));
 
@@ -204,18 +205,18 @@ static void
 output_update(StringInfo out, Relation relation, char *schema_name,
 			  ReorderBufferChange *change)
 {
-	// HeapTuple old_tuple;
-	// HeapTuple new_tuple;
+	/* HeapTuple old_tuple; */
+	/* HeapTuple new_tuple; */
 
 	Assert(change->action == REORDER_BUFFER_CHANGE_UPDATE);
 
-	// /* Extract information from arguments */
-	// old_tuple = change->data.tp.oldtuple;
-	// new_tuple = change->data.tp.newtuple;
+	/* Extract information from arguments */
+	/* old_tuple = change->data.tp.oldtuple; */
+	/* new_tuple = change->data.tp.newtuple; */
 
 	/* Construction the query */
-	appendStringInfo(out, "UPDATE %s.%s SET ", schema_name,
-					 RelationGetRelationName(relation));
+		appendStringInfo(out, "UPDATE %s.%s SET ", schema_name,
+						 RelationGetRelationName(relation));
 }
 
 /*
@@ -225,16 +226,16 @@ static void
 output_delete(StringInfo out, Relation relation, char *schema_name,
 			  ReorderBufferChange *change)
 {
-	// HeapTuple old_tuple;
+	/* HeapTuple old_tuple; */
 
 	Assert(change->action == REORDER_BUFFER_CHANGE_DELETE);
 
-	// /* Extract information from arguments */
-	// old_tuple = change->data.tp.oldtuple;
+	/* Extract information from arguments */
+	/* old_tuple = change->data.tp.oldtuple; */
 
 	/* Construction the query */
-	appendStringInfo(out, "DELETE FROM %s.%s ", schema_name,
-					 RelationGetRelationName(relation));
+		appendStringInfo(out, "DELETE FROM %s.%s ", schema_name,
+						 RelationGetRelationName(relation));
 }
 
 /* Callback routines */
@@ -282,9 +283,9 @@ static void
 follower_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 				Relation relation, ReorderBufferChange *change)
 {
-	char		   *schema_name;
+	char	   *schema_name;
 	PgFollowerData *data = (PgFollowerData *) ctx->output_plugin_private;
-	MemoryContext	old;
+	MemoryContext old;
 
 	/* Avoid leaking memory by using and resetting our own context */
 	old = MemoryContextSwitchTo(data->context);
